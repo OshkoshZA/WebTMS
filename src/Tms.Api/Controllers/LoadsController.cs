@@ -21,12 +21,16 @@ public record AddLoadLegRequest(
     Guid? VehicleId,
     Guid? DriverId);
 
+public record AllocateLoadLegRequest(Guid VehicleId, Guid DriverId);
+
 public record AddCommodityLineRequest(
     Guid CommodityId,
     decimal Quantity,
     Guid UnitOfMeasureId,
     decimal SellRatePerUnit,
     string? CreditOverrideReason = null);
+
+public record HoldLoadRequest(string Reason);
 
 public record LoadTrackingResponse(Guid LoadId, LoadStatus Status, IReadOnlyList<LoadLeg> Legs, IReadOnlyList<LoadStatusHistory> History);
 
@@ -35,6 +39,11 @@ public record LoadTrackingResponse(Guid LoadId, LoadStatus Status, IReadOnlyList
 /// (docs/architecture.html §5.1, §5.2, §5.4). AR Outstanding is still zero — see
 /// the TODO in CreditExposureService — so today's check is WIP-only; it becomes
 /// exact the moment Tms.Modules.Billing exists, with no change needed here.
+///
+/// The lifecycle stops short of PodReceived/Invoiced/Closed: those depend on
+/// Debrief and Billing (Phase 2/3), which don't exist yet. Booked → Allocated →
+/// InTransit → Delivered, plus the On Hold and Cancelled exception branches, are
+/// fully wired; the rest picks up once those modules land.
 /// </summary>
 [ApiController]
 [Route("api/v1/loads")]
@@ -57,6 +66,10 @@ public class LoadsController : ControllerBase
         _currentUser = currentUser;
         _creditExposure = creditExposure;
     }
+
+    [HttpGet]
+    public async Task<ActionResult<IEnumerable<Load>>> List(CancellationToken ct)
+        => Ok(await _db.Loads.OrderByDescending(l => l.Id).ToListAsync(ct));
 
     [HttpPost]
     public async Task<ActionResult<Load>> Create(CreateLoadRequest request, CancellationToken ct)
@@ -116,7 +129,7 @@ public class LoadsController : ControllerBase
         if (_tenantContext.TenantId is null || _tenantContext.CompanyId is null)
             return Unauthorized("Request is missing a resolved Tenant/Company context.");
 
-        var load = await _db.Loads.FirstOrDefaultAsync(l => l.Id == id, ct);
+        var load = await _db.Loads.Include(l => l.Legs).FirstOrDefaultAsync(l => l.Id == id, ct);
         if (load is null) return NotFound();
 
         var leg = new LoadLeg
@@ -130,28 +143,122 @@ public class LoadsController : ControllerBase
             ExecutionType = request.ExecutionType,
             CostCentreId = request.CostCentreId,
             VehicleId = request.VehicleId,
-            DriverId = request.DriverId
+            DriverId = request.DriverId,
+            Status = request.VehicleId is not null && request.DriverId is not null
+                ? LoadLegStatus.Allocated
+                : LoadLegStatus.Planned
         };
 
         _db.LoadLegs.Add(leg);
+        load.Legs.Add(leg);
 
-        if (load.Status == LoadStatus.Booked && (request.VehicleId is not null || request.DriverId is not null))
-        {
-            _db.LoadStatusHistories.Add(new LoadStatusHistory
-            {
-                TenantId = load.TenantId,
-                CompanyId = load.CompanyId,
-                LoadId = load.Id,
-                FromStatus = load.Status,
-                ToStatus = LoadStatus.Allocated,
-                ChangedByUserId = _currentUser.UserId ?? Guid.Empty
-            });
-            load.Status = LoadStatus.Allocated;
-        }
-
+        await RecomputeLoadStatusAsync(load, ct);
         await _db.SaveChangesAsync(ct);
 
         return CreatedAtAction(nameof(Get), new { id = load.Id }, leg);
+    }
+
+    /// <summary>Assigns a vehicle and driver to a leg that was created without one yet, moving it from Planned to Allocated.</summary>
+    [HttpPost("{id:guid}/legs/{legId:guid}/allocate")]
+    public async Task<IActionResult> AllocateLeg(Guid id, Guid legId, AllocateLoadLegRequest request, CancellationToken ct)
+    {
+        var load = await _db.Loads.Include(l => l.Legs).FirstOrDefaultAsync(l => l.Id == id, ct);
+        if (load is null) return NotFound();
+
+        var leg = load.Legs.FirstOrDefault(l => l.Id == legId);
+        if (leg is null) return NotFound($"Leg {legId} was not found on load {id}.");
+        if (leg.Status != LoadLegStatus.Planned)
+            return Conflict($"Leg is {leg.Status}; only a Planned leg can be allocated.");
+
+        leg.VehicleId = request.VehicleId;
+        leg.DriverId = request.DriverId;
+        leg.Status = LoadLegStatus.Allocated;
+
+        await RecomputeLoadStatusAsync(load, ct);
+        await _db.SaveChangesAsync(ct);
+        return NoContent();
+    }
+
+    /// <summary>Marks a leg as under way. Requires the leg to already be Allocated (own fleet only, Phase 1 — §5.1).</summary>
+    [HttpPost("{id:guid}/legs/{legId:guid}/start")]
+    public async Task<IActionResult> StartLeg(Guid id, Guid legId, CancellationToken ct)
+    {
+        var load = await _db.Loads.Include(l => l.Legs).FirstOrDefaultAsync(l => l.Id == id, ct);
+        if (load is null) return NotFound();
+
+        var leg = load.Legs.FirstOrDefault(l => l.Id == legId);
+        if (leg is null) return NotFound($"Leg {legId} was not found on load {id}.");
+        if (leg.Status != LoadLegStatus.Allocated)
+            return Conflict($"Leg is {leg.Status}; only an Allocated leg can start.");
+        if (load.Status == LoadStatus.OnHold)
+            return Conflict("Load is On Hold; release it before starting any further legs.");
+
+        leg.Status = LoadLegStatus.InTransit;
+
+        await RecomputeLoadStatusAsync(load, ct);
+        await _db.SaveChangesAsync(ct);
+        return NoContent();
+    }
+
+    /// <summary>Marks a leg as physically delivered — the load overall reaches Delivered once every leg has (§5.2).</summary>
+    [HttpPost("{id:guid}/legs/{legId:guid}/deliver")]
+    public async Task<IActionResult> DeliverLeg(Guid id, Guid legId, CancellationToken ct)
+    {
+        var load = await _db.Loads.Include(l => l.Legs).FirstOrDefaultAsync(l => l.Id == id, ct);
+        if (load is null) return NotFound();
+
+        var leg = load.Legs.FirstOrDefault(l => l.Id == legId);
+        if (leg is null) return NotFound($"Leg {legId} was not found on load {id}.");
+        if (leg.Status != LoadLegStatus.InTransit)
+            return Conflict($"Leg is {leg.Status}; only an In Transit leg can be delivered.");
+
+        leg.Status = LoadLegStatus.Delivered;
+
+        await RecomputeLoadStatusAsync(load, ct);
+        await _db.SaveChangesAsync(ct);
+        return NoContent();
+    }
+
+    /// <summary>Pauses a load for a query or dispute — only while In Transit (§5.2 Fig. 3).</summary>
+    [HttpPost("{id:guid}/hold")]
+    public async Task<IActionResult> Hold(Guid id, HoldLoadRequest request, CancellationToken ct)
+    {
+        var load = await _db.Loads.FirstOrDefaultAsync(l => l.Id == id, ct);
+        if (load is null) return NotFound();
+        if (load.Status != LoadStatus.InTransit)
+            return Conflict($"Load is {load.Status}; only a load In Transit can be put On Hold.");
+
+        await TransitionLoadStatusAsync(load, LoadStatus.OnHold, request.Reason, ct);
+        await _db.SaveChangesAsync(ct);
+        return NoContent();
+    }
+
+    /// <summary>Resumes a load that was On Hold, returning it to In Transit (§5.2 Fig. 3).</summary>
+    [HttpPost("{id:guid}/release-hold")]
+    public async Task<IActionResult> ReleaseHold(Guid id, CancellationToken ct)
+    {
+        var load = await _db.Loads.FirstOrDefaultAsync(l => l.Id == id, ct);
+        if (load is null) return NotFound();
+        if (load.Status != LoadStatus.OnHold)
+            return Conflict($"Load is {load.Status}, not On Hold.");
+
+        await TransitionLoadStatusAsync(load, LoadStatus.InTransit, reason: null, ct);
+        await _db.SaveChangesAsync(ct);
+        return NoContent();
+    }
+
+    /// <summary>Cancels a load — only while it's still Booked or Allocated (§5.2 Fig. 3); once execution starts, it can no longer be cancelled outright.</summary>
+    [HttpPost("{id:guid}/cancel")]
+    public async Task<IActionResult> Cancel(Guid id, CancellationToken ct)
+    {
+        var load = await _db.Loads.FirstOrDefaultAsync(l => l.Id == id, ct);
+        if (load is null) return NotFound();
+        if (load.Status != LoadStatus.Booked && load.Status != LoadStatus.Allocated)
+            return Conflict($"Load is {load.Status}; only Booked or Allocated loads can be cancelled.");
+
+        await TransitionLoadStatusAsync(load, LoadStatus.Cancelled, reason: null, ct);
+        await _db.SaveChangesAsync(ct);
+        return NoContent();
     }
 
     /// <summary>
@@ -206,6 +313,44 @@ public class LoadsController : ControllerBase
         await _db.SaveChangesAsync(ct);
 
         return CreatedAtAction(nameof(Get), new { id }, commodityLine);
+    }
+
+    /// <summary>
+    /// Recomputes Load.Status from its legs' individual statuses and, if it changed,
+    /// records the transition (§5.2). Never touches On Hold or Cancelled — those are
+    /// exception states only a manual action (Hold/ReleaseHold/Cancel) can enter or leave.
+    /// </summary>
+    private async Task RecomputeLoadStatusAsync(Load load, CancellationToken ct)
+    {
+        if (load.Status is LoadStatus.OnHold or LoadStatus.Cancelled)
+            return;
+
+        var legs = load.Legs;
+        var next = legs.Count == 0
+            ? LoadStatus.Booked
+            : legs.All(l => l.Status == LoadLegStatus.Delivered) ? LoadStatus.Delivered
+            : legs.Any(l => l.Status is LoadLegStatus.InTransit or LoadLegStatus.Delivered) ? LoadStatus.InTransit
+            : legs.All(l => l.Status == LoadLegStatus.Allocated) ? LoadStatus.Allocated
+            : LoadStatus.Booked;
+
+        if (next != load.Status)
+            await TransitionLoadStatusAsync(load, next, reason: null, ct);
+    }
+
+    private Task TransitionLoadStatusAsync(Load load, LoadStatus next, string? reason, CancellationToken ct)
+    {
+        _db.LoadStatusHistories.Add(new LoadStatusHistory
+        {
+            TenantId = load.TenantId,
+            CompanyId = load.CompanyId,
+            LoadId = load.Id,
+            FromStatus = load.Status,
+            ToStatus = next,
+            ChangedByUserId = _currentUser.UserId ?? Guid.Empty,
+            Reason = reason
+        });
+        load.Status = next;
+        return Task.CompletedTask;
     }
 
     /// <summary>

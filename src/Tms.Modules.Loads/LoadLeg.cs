@@ -9,6 +9,20 @@ public enum LoadLegExecutionType
 }
 
 /// <summary>
+/// A leg's own progress, independent of the other legs on the same load — what
+/// Load.Status (§5.2) rolls up from. Not itself documented as a named entity in
+/// docs/architecture.html, but needed to make "a load cannot reach Delivered until
+/// every leg has been" (§5.2) true for a multi-leg load rather than approximate.
+/// </summary>
+public enum LoadLegStatus
+{
+    Planned,
+    Allocated,
+    InTransit,
+    Delivered
+}
+
+/// <summary>
 /// One movement within a load (docs/architecture.html §5.1) — a load may have several,
 /// e.g. collection → hub → final mile. Carries one-or-more <see cref="CommodityLine"/>s
 /// rather than a single price itself (§5.5); SubcontractorId is a bare id for now —
@@ -21,6 +35,7 @@ public class LoadLeg : CompanyScopedEntity
     public Guid OriginLocationId { get; set; }
     public Guid DestinationLocationId { get; set; }
     public LoadLegExecutionType ExecutionType { get; set; } = LoadLegExecutionType.OwnFleet;
+    public LoadLegStatus Status { get; set; } = LoadLegStatus.Planned;
     public Guid CostCentreId { get; set; }
     public Guid? VehicleId { get; set; }
     public Guid? DriverId { get; set; }
