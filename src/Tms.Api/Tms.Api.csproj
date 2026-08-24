@@ -1,0 +1,26 @@
+﻿<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <UserSecretsId>a6d5553f-0a25-451d-8543-e2dd645cf047</UserSecretsId>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.AspNetCore.Authentication.JwtBearer" Version="8.0.10" />
+    <PackageReference Include="Swashbuckle.AspNetCore" Version="6.7.3" />
+    <PackageReference Include="System.IdentityModel.Tokens.Jwt" Version="8.1.2" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Tms.Infrastructure\Tms.Infrastructure.csproj" />
+    <ProjectReference Include="..\Tms.Modules.Identity\Tms.Modules.Identity.csproj" />
+    <ProjectReference Include="..\Tms.Modules.Loads\Tms.Modules.Loads.csproj" />
+    <ProjectReference Include="..\Tms.Modules.Fleet\Tms.Modules.Fleet.csproj" />
+    <ProjectReference Include="..\Tms.Shared\Tms.Shared.csproj" />
+    <ProjectReference Include="..\Tms.Modules.Rating\Tms.Modules.Rating.csproj" />
+    <ProjectReference Include="..\Tms.Modules.Audit\Tms.Modules.Audit.csproj" />
+  </ItemGroup>
+
+</Project>

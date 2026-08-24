@@ -1,0 +1,21 @@
+# .NET
+bin/
+obj/
+*.user
+.vs/
+
+# Node / Vue
+node_modules/
+dist/
+dist-ssr/
+*.local
+
+# Env / secrets
+.env
+.env.*
+appsettings.*.local.json
+
+# OS / editor
+.DS_Store
+Thumbs.db
+*.log

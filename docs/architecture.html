@@ -1,0 +1,1536 @@
+<title>Consignment Architecture</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@600;700;800&family=Public+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap">
+<style>
+  :root{
+    --bg:#f0f1f3;
+    --surface:#ffffff;
+    --surface-2:#e6e9ed;
+    --ink:#12202f;
+    --ink-soft:#4b5c6b;
+    --ink-faint:#7c8b99;
+    --line:#d7dbe0;
+    --line-strong:#b9c0c9;
+    --accent:#c9701c;
+    --accent-ink:#8a4d10;
+    --accent-soft:#f3e0c9;
+    --good:#2f8f5b;
+    --good-soft:#dcefe3;
+    --warn:#b8860f;
+    --warn-soft:#f5e9c9;
+    --bad:#b23a2c;
+    --bad-soft:#f6dfda;
+    --shadow: 0 1px 2px rgba(18,32,47,0.06), 0 6px 20px rgba(18,32,47,0.05);
+    --radius: 10px;
+  }
+  @media (prefers-color-scheme: dark){
+    :root:not([data-theme="light"]){
+      --bg:#0c131d;
+      --surface:#131c29;
+      --surface-2:#1a2532;
+      --ink:#e8edf2;
+      --ink-soft:#aab9c6;
+      --ink-faint:#7e8e9c;
+      --line:#263243;
+      --line-strong:#34435a;
+      --accent:#e79a44;
+      --accent-ink:#f0ac5c;
+      --accent-soft:#3a2c18;
+      --good:#5cbf8e;
+      --good-soft:#173226;
+      --warn:#e0b23f;
+      --warn-soft:#3a2f12;
+      --bad:#e2685a;
+      --bad-soft:#3a1e19;
+      --shadow: 0 1px 2px rgba(0,0,0,0.3), 0 8px 30px rgba(0,0,0,0.35);
+    }
+  }
+  :root[data-theme="dark"]{
+    --bg:#0c131d;
+    --surface:#131c29;
+    --surface-2:#1a2532;
+    --ink:#e8edf2;
+    --ink-soft:#aab9c6;
+    --ink-faint:#7e8e9c;
+    --line:#263243;
+    --line-strong:#34435a;
+    --accent:#e79a44;
+    --accent-ink:#f0ac5c;
+    --accent-soft:#3a2c18;
+    --good:#5cbf8e;
+    --good-soft:#173226;
+    --warn:#e0b23f;
+    --warn-soft:#3a2f12;
+    --bad:#e2685a;
+    --bad-soft:#3a1e19;
+    --shadow: 0 1px 2px rgba(0,0,0,0.3), 0 8px 30px rgba(0,0,0,0.35);
+  }
+
+  *{box-sizing:border-box;}
+  body{
+    margin:0;
+    background:var(--bg);
+    color:var(--ink);
+    font-family:"Public Sans", "Segoe UI", system-ui, sans-serif;
+    font-size:15.5px;
+    line-height:1.6;
+    -webkit-font-smoothing:antialiased;
+  }
+  ::selection{ background:var(--accent-soft); color:var(--accent-ink); }
+
+  h1,h2,h3,h4{
+    font-family:"Archivo","Segoe UI",sans-serif;
+    text-wrap:balance;
+    color:var(--ink);
+    margin:0 0 0.4em 0;
+  }
+  a{ color:var(--accent-ink); }
+  code, .mono, .num, td.num{ font-family:"JetBrains Mono", ui-monospace, monospace; }
+
+  .page{
+    display:grid;
+    grid-template-columns: 250px minmax(0,1fr);
+    gap:0;
+    max-width:1240px;
+    margin:0 auto;
+  }
+
+  /* ---- Header band ---- */
+  .hero{
+    grid-column: 1 / -1;
+    padding: 46px clamp(20px,4vw,56px) 34px;
+    border-bottom:1px solid var(--line);
+    background:
+      linear-gradient(180deg, var(--surface) 0%, var(--bg) 100%);
+  }
+  .eyebrow{
+    display:inline-flex; align-items:center; gap:8px;
+    font-family:"JetBrains Mono", monospace;
+    font-size:11.5px; letter-spacing:0.12em; text-transform:uppercase;
+    color:var(--accent-ink);
+    background:var(--accent-soft);
+    border:1px solid color-mix(in srgb, var(--accent) 35%, transparent);
+    padding:4px 10px; border-radius:999px;
+    margin-bottom:16px;
+  }
+  .hero h1{
+    font-size:clamp(28px,3.6vw,42px);
+    font-weight:800;
+    letter-spacing:-0.01em;
+    max-width:16ch;
+  }
+  .hero .sub{
+    color:var(--ink-soft);
+    font-size:16.5px;
+    max-width:62ch;
+    margin-top:10px;
+  }
+  .stackrow{
+    display:flex; flex-wrap:wrap; gap:8px;
+    margin-top:22px;
+  }
+  .chip{
+    font-family:"JetBrains Mono",monospace;
+    font-size:12px;
+    padding:5px 10px;
+    border-radius:6px;
+    border:1px solid var(--line-strong);
+    background:var(--surface);
+    color:var(--ink-soft);
+  }
+  .metaline{
+    margin-top:18px;
+    font-size:12.5px;
+    color:var(--ink-faint);
+    display:flex; gap:18px; flex-wrap:wrap;
+  }
+
+  /* ---- Nav ---- */
+  nav.toc{
+    position:sticky; top:0; align-self:start;
+    height:100vh;
+    overflow-y:auto;
+    padding:28px 18px 40px 28px;
+    border-right:1px solid var(--line);
+    font-size:13px;
+  }
+  nav.toc .navlabel{
+    font-family:"JetBrains Mono",monospace;
+    font-size:11px; letter-spacing:0.1em; text-transform:uppercase;
+    color:var(--ink-faint);
+    margin-bottom:10px;
+  }
+  nav.toc a{
+    display:flex; gap:8px;
+    color:var(--ink-soft);
+    text-decoration:none;
+    padding:5px 8px;
+    border-radius:6px;
+    line-height:1.35;
+  }
+  nav.toc a:hover{ background:var(--surface-2); color:var(--ink); }
+  nav.toc a .n{ color:var(--ink-faint); font-family:"JetBrains Mono",monospace; font-size:11.5px; min-width:1.4em; }
+  nav.toc .group{ margin-bottom:4px; }
+
+  /* ---- Main content ---- */
+  main{ padding: 8px clamp(20px,4vw,56px) 90px; min-width:0; }
+  section{ padding-top:44px; scroll-margin-top:20px; border-top:1px solid var(--line); }
+  section:first-of-type{ border-top:none; }
+  .secnum{
+    font-family:"JetBrains Mono",monospace;
+    color:var(--accent-ink);
+    font-size:13px;
+    letter-spacing:0.06em;
+  }
+  h2{ font-size:24px; margin-top:2px; }
+  h2 .secnum{ display:block; margin-bottom:4px; }
+  h3{ font-size:17px; margin-top:28px; color:var(--ink); }
+  h3 .secnum{ margin-right:8px; }
+  p{ max-width:74ch; color:var(--ink); }
+  p.lede{ color:var(--ink-soft); max-width:74ch; }
+  ul,ol{ max-width:72ch; padding-left:1.3em; }
+  li{ margin-bottom:6px; }
+  strong{ color:var(--ink); }
+
+  .card{
+    background:var(--surface);
+    border:1px solid var(--line);
+    border-radius:var(--radius);
+    box-shadow:var(--shadow);
+    padding:20px 22px;
+  }
+  .grid2{ display:grid; grid-template-columns:1fr 1fr; gap:16px; }
+  .grid3{ display:grid; grid-template-columns:repeat(3,1fr); gap:14px; }
+  @media (max-width:820px){ .grid2,.grid3{ grid-template-columns:1fr; } .page{grid-template-columns:1fr;} nav.toc{ position:static; height:auto; border-right:none; border-bottom:1px solid var(--line);} }
+
+  .tag{
+    display:inline-block; font-size:11px; font-family:"JetBrains Mono",monospace;
+    padding:2px 7px; border-radius:5px; margin-right:4px;
+    background:var(--surface-2); color:var(--ink-soft); border:1px solid var(--line);
+  }
+  .tag.pk{ background:var(--accent-soft); color:var(--accent-ink); border-color:transparent; }
+  .tag.fk{ background:var(--good-soft); color:var(--good); border-color:transparent; }
+
+  table{ border-collapse:collapse; width:100%; font-size:13.5px; }
+  thead th{
+    text-align:left; font-family:"JetBrains Mono",monospace; font-weight:500;
+    font-size:11px; letter-spacing:0.06em; text-transform:uppercase;
+    color:var(--ink-faint); border-bottom:1px solid var(--line-strong);
+    padding:8px 12px;
+  }
+  tbody td{ padding:9px 12px; border-bottom:1px solid var(--line); vertical-align:top; color:var(--ink-soft); }
+  tbody tr:last-child td{ border-bottom:none; }
+  tbody td:first-child{ color:var(--ink); font-weight:600; }
+  .tablewrap{ overflow-x:auto; border:1px solid var(--line); border-radius:var(--radius); background:var(--surface); box-shadow:var(--shadow); }
+  .tablewrap table{ min-width:560px; }
+
+  .diagram{
+    background:var(--surface); border:1px solid var(--line); border-radius:var(--radius);
+    box-shadow:var(--shadow); padding:20px; overflow-x:auto;
+  }
+  .diagram .cap{ font-size:12.5px; color:var(--ink-faint); margin-top:10px; border-top:1px dashed var(--line); padding-top:8px; }
+
+  .pill{ display:inline-flex; align-items:center; gap:6px; font-size:12px; padding:3px 10px; border-radius:999px; font-weight:600; }
+  .pill.good{ background:var(--good-soft); color:var(--good); }
+  .pill.warn{ background:var(--warn-soft); color:var(--warn); }
+  .pill.bad{ background:var(--bad-soft); color:var(--bad); }
+  .pill.accent{ background:var(--accent-soft); color:var(--accent-ink); }
+
+  .phase{
+    display:flex; gap:16px; padding:16px 0; border-bottom:1px solid var(--line);
+  }
+  .phase:last-child{ border-bottom:none; }
+  .phase .ph-num{
+    font-family:"Archivo",sans-serif; font-weight:800; font-size:22px; color:var(--line-strong);
+    min-width:2.2ch;
+  }
+  .phase h4{ font-size:15px; margin-bottom:4px; }
+  .phase .when{ font-size:11.5px; color:var(--ink-faint); font-family:"JetBrains Mono",monospace; }
+
+  .note{
+    border-left:3px solid var(--accent); background:var(--accent-soft);
+    padding:12px 16px; border-radius:0 8px 8px 0; font-size:13.5px; color:var(--ink);
+  }
+  .note strong{ color:var(--accent-ink); }
+
+  hr.divider{ border:none; border-top:1px solid var(--line); margin:34px 0; }
+
+  footer{
+    grid-column:1/-1;
+    padding:30px clamp(20px,4vw,56px) 60px;
+    color:var(--ink-faint); font-size:12.5px;
+    border-top:1px solid var(--line);
+  }
+
+  .mermaid{ font-family:"Public Sans",sans-serif !important; }
+</style>
+
+<div class="page">
+
+  <div class="hero">
+    <span class="eyebrow">Architecture &amp; Design Specification</span>
+    <h1>Transport Management System</h1>
+    <p class="sub">A multi-country, multi-currency platform for managing loads across owned fleet and subcontracted capacity — vehicle and driver masters, rate cards, cost centre allocation, driver debriefing, and a full API for external integration.</p>
+    <div class="stackrow">
+      <span class="chip">Vue.js 3 + Pinia + TypeScript</span>
+      <span class="chip">ASP.NET Core 8 Web API</span>
+      <span class="chip">Microsoft SQL Server</span>
+      <span class="chip">REST + Webhooks</span>
+      <span class="chip">OAuth2 / JWT · RBAC</span>
+      <span class="chip">Multi-tenant · Multi-currency</span>
+    </div>
+    <div class="metaline">
+      <span>Prepared for w.charles@freitan.co.za</span>
+      <span>Version 0.1 — draft for review</span>
+      <span>2026-08-23</span>
+    </div>
+  </div>
+
+  <nav class="toc">
+    <div class="navlabel">Contents</div>
+    <div class="group">
+      <a href="#overview"><span class="n">01</span> Overview &amp; Goals</a>
+      <a href="#stack"><span class="n">02</span> Technology Stack</a>
+      <a href="#architecture"><span class="n">03</span> System Architecture</a>
+      <a href="#tenancy"><span class="n">04</span> Tenancy, Country &amp; Currency</a>
+      <a href="#domain"><span class="n">05</span> Core Domain Model</a>
+      <a href="#modules"><span class="n">06</span> Module Breakdown</a>
+      <a href="#rbac"><span class="n">07</span> Users, Roles &amp; Functions</a>
+      <a href="#rates"><span class="n">08</span> Rating &amp; Costing</a>
+      <a href="#debrief"><span class="n">09</span> Driver Debriefing</a>
+      <a href="#billing"><span class="n">10</span> Invoicing &amp; Payables</a>
+      <a href="#api"><span class="n">11</span> API &amp; Integration</a>
+      <a href="#audit"><span class="n">12</span> Audit Trail</a>
+      <a href="#portals"><span class="n">13</span> Customer &amp; Supplier Portals</a>
+      <a href="#privacy"><span class="n">14</span> Data Retention &amp; Privacy Compliance</a>
+      <a href="#dr"><span class="n">15</span> Backup &amp; Disaster Recovery</a>
+      <a href="#dashboards"><span class="n">16</span> Dashboards, Reporting &amp; Exceptions</a>
+      <a href="#nfr"><span class="n">17</span> Non-Functional Requirements</a>
+      <a href="#structure"><span class="n">18</span> Solution Structure</a>
+      <a href="#roadmap"><span class="n">19</span> Delivery Roadmap</a>
+    </div>
+  </nav>
+
+  <main>
+
+    <!-- 01 OVERVIEW -->
+    <section id="overview">
+      <h2><span class="secnum">01</span>Overview &amp; Goals</h2>
+      <p class="lede">The system manages the full life cycle of a <strong>load</strong> — from booking through execution on either an owned vehicle or a subcontracted carrier — across multiple operating countries, each with its own currency, cost centre structure, and user base, on one shared platform.</p>
+      <div class="grid3" style="margin-top:20px;">
+        <div class="card">
+          <strong>Own fleet + subcontractors</strong>
+          <p style="margin:6px 0 0;font-size:13.5px;">Every load leg is either run by a company vehicle/driver or outsourced. Subcontracted legs carry an independent buy rate and unit of measure, distinct from the customer sell rate.</p>
+        </div>
+        <div class="card">
+          <strong>Built for scale across countries — and customers</strong>
+          <p style="margin:6px 0 0;font-size:13.5px;">One codebase, one database engine, tenant-scoped data (§04) — new countries onboard by configuration, and the same platform can host other, entirely unrelated transport operators with zero cross-visibility between them.</p>
+        </div>
+        <div class="card">
+          <strong>Open by design</strong>
+          <p style="margin:6px 0 0;font-size:13.5px;">A first-class REST API and outbound webhooks let ERPs, customer portals, telematics, and EDI partners integrate without back-door database access.</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- 02 STACK -->
+    <section id="stack">
+      <h2><span class="secnum">02</span>Technology Stack</h2>
+      <div class="tablewrap">
+        <table>
+          <thead><tr><th>Layer</th><th>Choice</th><th>Notes</th></tr></thead>
+          <tbody>
+            <tr><td>Frontend</td><td>Vue 3 (Composition API) + TypeScript, Pinia, Vue Router, Vite</td><td>PrimeVue or Vuetify for the data-grid-heavy screens (load boards, rate grids); i18n via <span class="mono">vue-i18n</span> for country-specific labels/date formats.</td></tr>
+            <tr><td>API</td><td>ASP.NET Core 8 Web API, C#</td><td>Native EF Core → SQL Server mapping, mature <span class="mono">Microsoft.Identity</span> / OAuth2 stack, strong typing across a large domain model.</td></tr>
+            <tr><td>Database</td><td>Microsoft SQL Server (Azure SQL or on-prem)</td><td>Tenant/company/country scoping enforced twice — EF Core query filters plus native Row-Level Security policies (§4.1); temporal tables for audit history on master data.</td></tr>
+            <tr><td>Auth</td><td>ASP.NET Core Identity + JWT bearer tokens (user sessions); OAuth2 client-credentials for system-to-system API access</td><td>Custom role/function tables layered on top of Identity's role model (see §07).</td></tr>
+            <tr><td>Integration</td><td>REST API (OpenAPI 3 spec) + outbound webhooks; optional message bus (Azure Service Bus / RabbitMQ) for async events</td><td>See §11.</td></tr>
+            <tr><td>Background jobs</td><td>Hangfire or Quartz.NET</td><td>Exchange-rate refresh, scheduled debrief reminders, EDI batch exports.</td></tr>
+            <tr><td>Hosting</td><td>Containerised (Docker) API + SPA, deployable to Azure App Service/AKS or on-prem IIS</td><td>Stateless API tier scales horizontally per country's traffic profile.</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- 03 ARCHITECTURE -->
+    <section id="architecture">
+      <h2><span class="secnum">03</span>System Architecture</h2>
+      <p class="lede">A single Vue SPA talks to a modular ASP.NET Core API through one gateway. Internally the API is organised into bounded modules that share the domain database but own their own tables and services — a "modular monolith" that can be split into services later if a module's load justifies it.</p>
+      <div class="diagram">
+<pre class="mermaid">
+flowchart TB
+    subgraph Clients
+        WEB["Vue 3 SPA<br/>(ops staff, dispatch, finance)"]
+        MOB["Driver mobile web<br/>(debrief capture)"]
+        CPORTAL["Customer Portal<br/>(client contacts, §13)"]
+        SPORTAL["Supplier Portal<br/>(subcontractor contacts, §13)"]
+        PARTNER["Integration partners<br/>(ERP, telematics, EDI)"]
+    end
+
+    GW["API Gateway / BFF<br/>AuthN · rate limiting · routing"]
+
+    subgraph API["ASP.NET Core Web API — modular monolith"]
+        AUTHM["Identity &amp; RBAC"]
+        LOADM["Load &amp; Dispatch"]
+        VEHM["Vehicle &amp; Driver Master"]
+        RATEM["Rating &amp; Costing"]
+        DEBM["Driver Debriefing"]
+        FINM["Cost Centre &amp; Finance"]
+        INTM["Integration &amp; Webhooks"]
+    end
+
+    DB[("SQL Server<br/>tenant/country scoped")]
+    BUS[["Event bus /<br/>background jobs"]]
+
+    WEB --> GW
+    MOB --> GW
+    CPORTAL -->|JWT: ClientId claim| GW
+    SPORTAL -->|JWT: SubcontractorId claim| GW
+    PARTNER -->|API key / OAuth2| GW
+    GW --> AUTHM & LOADM & VEHM & RATEM & DEBM & FINM & INTM
+    AUTHM --> DB
+    LOADM --> DB
+    VEHM --> DB
+    RATEM --> DB
+    DEBM --> DB
+    FINM --> DB
+    INTM --> DB
+    LOADM --> BUS
+    DEBM --> BUS
+    BUS --> INTM
+    INTM -->|webhooks out| PARTNER
+</pre>
+        <div class="cap">Fig. 1 — All modules share one database and one deployable API; the Integration module is the only egress/ingress point for external systems.</div>
+      </div>
+    </section>
+
+    <!-- 04 TENANCY -->
+    <section id="tenancy">
+      <h2><span class="secnum">04</span>Tenancy, Country &amp; Currency Model</h2>
+      <p class="lede">Three nested scoping boundaries make this one shared platform rather than one deployment per customer: a <span class="mono">Tenant</span> (a single, entirely separate customer of the platform), a <span class="mono">Company</span> (one of that tenant's own legal entities, one per operating country), and the Country/Currency context each Company inherits. Only the outer boundary — Tenant — is ever absolute; reporting and roles are free to roll up within it.</p>
+
+      <h3><span class="secnum">4.1</span>Tenant isolation — the SaaS boundary</h3>
+      <p style="font-size:13.5px;max-width:70ch;">Rolling this out to other, unrelated transport operators as a SaaS product means one more scoping level above Company: a <span class="mono">Tenant</span> is a single signed-up customer of the platform, owning one or more Companies exactly as described below. Two tenants share the same database, application, and infrastructure — and must never be able to see, query, or infer the existence of each other's data.</p>
+      <ul style="font-size:13.5px;">
+        <li>Every table that already carries a <span class="mono">CompanyId</span>/<span class="mono">CountryId</span> also carries a <span class="mono">TenantId</span>, resolved once from the caller's JWT at the very top of the request pipeline — never taken from a request body or query string, so a client can't simply ask for a different tenant's id.</li>
+        <li><strong>Defense in depth, not one filter:</strong> an EF Core global query filter scopes every query by Tenant (then Company/Country) at the application layer — the same mechanism already used for country scoping. Underneath that, <strong>SQL Server Row-Level Security (RLS)</strong> — a built-in database feature, no extra licensing cost — enforces the identical boundary a second time, inside the database itself, keyed off a <span class="mono">SESSION_CONTEXT</span> value set once per connection from that same JWT claim. Even a bug that skips the application-layer filter still can't return another tenant's rows, because the database refuses them outright.</li>
+        <li>A "group" role can still roll up reporting across a tenant's own companies — that's unchanged — but no role crosses a tenant boundary, including our own day-to-day platform tooling. The one narrow exception is a heavily restricted, break-glass <strong>Platform Support</strong> role for our own operations staff, never assignable to a customer's own users, and captured in full by the same audit trail as everything else (§12).</li>
+        <li>Onboarding a new tenant follows the same story as onboarding a new country below: inserting rows — a Tenant, its first Company, an admin user — not provisioning new infrastructure.</li>
+      </ul>
+
+      <h3><span class="secnum">4.2</span>Pooled vs. isolated database</h3>
+      <p style="font-size:13.5px;max-width:70ch;">Most tenants share one database — the cheapest model to run, and RLS still guarantees one tenant never sees another's rows even though the data physically sits in the same tables. Some customers, particularly larger enterprise accounts, may contractually require full physical separation. Because the scoping key already exists on every row, that's a deployment choice rather than a rebuild: a specific tenant's connection string points at its own isolated database while every other tenant stays pooled, with no application code change either way.</p>
+      <div class="tablewrap">
+        <table>
+          <thead><tr><th>Model</th><th>Isolation</th><th>Cost</th><th>When</th></tr></thead>
+          <tbody>
+            <tr><td>Pooled (default)</td><td>Row-level — EF Core filter + SQL Server RLS</td><td>Lowest — shared infrastructure</td><td>Every tenant, by default</td></tr>
+            <tr><td>Silo (opt-in per tenant)</td><td>Physical — a dedicated database</td><td>Highest — infrastructure scales per tenant</td><td>A specific customer's contractual/regulatory requirement</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h3><span class="secnum">4.3</span>Company, country &amp; currency scoping (within a tenant)</h3>
+      <div class="grid2">
+        <div class="card">
+          <h4 style="margin-bottom:8px;">Scoping model</h4>
+          <ul style="font-size:13.5px;">
+            <li>Within a Tenant, a <span class="mono">Company</span> (legal entity) belongs to a <span class="mono">Country</span>, which fixes its default currency, tax regime, and numbering sequence. The Company record is itself master data — legal/trading name, registration number, VAT/tax number, physical &amp; postal address, and banking details — since this is exactly what must appear on every invoice, credit note, and subcontractor load confirmation it issues (see §5.1, §10).</li>
+            <li>Every transactional table (Load, Invoice, Debrief…) carries a <span class="mono">TenantId</span>, <span class="mono">CompanyId</span>, and <span class="mono">CountryId</span>; the same global query filter (§4.1) enforces all three automatically so no query can accidentally cross a company, let alone a tenant.</li>
+            <li>Users are assigned to one or more companies; a "group" role can see roll-up reports across all companies they're granted — always within their own Tenant, never across one (§4.1).</li>
+          </ul>
+        </div>
+        <div class="card">
+          <h4 style="margin-bottom:8px;">Currency handling</h4>
+          <ul style="font-size:13.5px;">
+            <li>Currency is fixed <strong>once per party, not per transaction</strong>: every <span class="mono">Client</span> and every <span class="mono">Subcontractor</span> record carries exactly one <span class="mono">CurrencyId</span>, set at onboarding. Every sell rate line, invoice, and credit note for that client — and every buy rate line and subcontractor expense for that subcontractor — is automatically denominated in it. There is no per-transaction currency override.</li>
+            <li>Because the client's currency and the subcontractor's currency are set independently, a single load leg can legitimately be sold in one currency and bought in another (e.g. sold to a South African client in ZAR, run by a Mozambican subcontractor in MZN).</li>
+            <li>An <span class="mono">ExchangeRate</span> table (currency pair, effective date, rate) is refreshed daily from a rate provider via a background job, and can be captured or overridden manually by finance through a dedicated endpoint (§11.2) when a provider rate is missing or disputed.</li>
+            <li>Buy/sell margin on a load leg is calculated in each side's own currency first, then the buy amount is converted to the sell currency using the rate effective on the load date — never re-priced retroactively when rates move.</li>
+            <li>Group-level dashboards convert to a chosen presentation currency at render time; underlying ledgers stay untouched.</li>
+            <li>Changing a client's or subcontractor's currency after go-live is a function-gated action (<span class="mono">client.currency.change</span>) — it affects every future document for that party, so historic invoices and expenses keep the currency they were originally issued in.</li>
+          </ul>
+        </div>
+      </div>
+      <div class="note" style="margin-top:16px;"><strong>Why scoped-tenant over separate databases:</strong> new countries — and new customer tenants — onboard by inserting configuration rows, not by provisioning infrastructure; head-office reporting is a query, not an ETL job; and RLS means the isolation guarantee doesn't depend on remembering to write it correctly every time.</div>
+    </section>
+
+    <!-- 05 DOMAIN MODEL -->
+    <section id="domain">
+      <h2><span class="secnum">05</span>Core Domain Model</h2>
+      <p class="lede">The entity relationship diagram below covers the load lifecycle, fleet/driver masters, rating, cost centres, and access control. Field lists for the highest-value entities follow.</p>
+      <div class="diagram">
+<pre class="mermaid">
+erDiagram
+    TENANT ||--o{ COMPANY : owns
+    COUNTRY ||--o{ COMPANY : "operates in"
+    CURRENCY ||--o{ COMPANY : "reporting currency"
+    CURRENCY ||--o{ CLIENT : "fixed billing currency"
+    CURRENCY ||--o{ SUBCONTRACTOR : "fixed payment currency"
+    COMPANY ||--o{ COST_CENTRE : owns
+    COMPANY ||--o{ VEHICLE : owns
+    COMPANY ||--o{ DRIVER : employs
+    COMPANY ||--o{ USER_ACCOUNT : hosts
+    COMPANY ||--o{ CLIENT : contracts
+    COMPANY ||--o{ SUBCONTRACTOR : engages
+
+    CLIENT ||--o{ LOAD : requests
+    LOAD }o--|| LOAD_TYPE : "classified as"
+    LOAD ||--|{ LOAD_LEG : "made up of"
+    LOAD ||--o{ LOAD_STATUS_HISTORY : "tracked by"
+    LOAD_LEG }o--|| COST_CENTRE : "charged to"
+    LOAD_LEG }o--o| VEHICLE : "run by (own fleet)"
+    LOAD_LEG }o--o| DRIVER : "driven by (own fleet)"
+    LOAD_LEG }o--o| SUBCONTRACTOR : "run by (outsourced)"
+    LOAD_LEG }o--|| LOCATION : "collects at"
+    LOAD_LEG }o--|| LOCATION : "delivers to"
+    LOCATION }o--|| COUNTRY : "situated in"
+    COMPANY ||--o{ LOCATION : maintains
+    LOAD_LEG ||--o| LOAD_CONFIRMATION : "confirmed by"
+    SUBCONTRACTOR ||--o{ LOAD_CONFIRMATION : receives
+
+    COMPANY ||--o{ COMMODITY : catalogs
+    LOAD_LEG ||--|{ COMMODITY_LINE : carries
+    COMMODITY_LINE }o--|| COMMODITY : "is a"
+    COMMODITY_LINE ||--|| RATE_LINE_SELL : bills
+    COMMODITY_LINE ||--o| RATE_LINE_BUY : costs
+
+    COMPANY ||--o{ ANCILLARY_SERVICE_TYPE : catalogs
+    LOAD_LEG ||--o{ ANCILLARY_SERVICE_LINE : "may require"
+    ANCILLARY_SERVICE_LINE }o--|| ANCILLARY_SERVICE_TYPE : "is a"
+    ANCILLARY_SERVICE_LINE }o--o| SUBCONTRACTOR : "provided by, if outsourced"
+    ANCILLARY_SERVICE_LINE ||--|| RATE_LINE_SELL : bills
+    ANCILLARY_SERVICE_LINE ||--o| RATE_LINE_BUY : costs
+
+    RATE_LINE_SELL }o--|| UNIT_OF_MEASURE : "priced per"
+    RATE_LINE_BUY }o--|| UNIT_OF_MEASURE : "priced per"
+
+    VEHICLE ||--o{ TRAILER_LINK : pairs
+    VEHICLE ||--o{ EQUIPMENT_ASSIGNMENT : "has issued"
+    EQUIPMENT ||--o{ EQUIPMENT_ASSIGNMENT : "tracked via"
+    COMPANY ||--o{ EQUIPMENT : owns
+    DRIVER ||--o{ DEBRIEF : submits
+    LOAD_LEG ||--|| DEBRIEF : "closed by"
+    DEBRIEF ||--o{ DEBRIEF_EXPENSE : lists
+    DEBRIEF_EXPENSE }o--|| EXPENSE_TYPE : "categorized as"
+    COMPANY ||--o{ EXPENSE_TYPE : catalogs
+    DEBRIEF ||--o{ DEBRIEF_INCIDENT : lists
+    DEBRIEF ||--o| SUBCONTRACTOR_ACCRUAL : "adjusts (extras)"
+
+    CLIENT ||--o{ INVOICE : "billed via"
+    INVOICE ||--|{ INVOICE_LINE : "made up of"
+    INVOICE_LINE }o--|| RATE_LINE_SELL : bills
+    CLIENT ||--o{ CREDIT_NOTE : "credited via"
+    CREDIT_NOTE ||--|{ CREDIT_NOTE_LINE : "made up of"
+    CREDIT_NOTE_LINE }o--o| INVOICE_LINE : adjusts
+
+    RATE_LINE_BUY ||--o| SUBCONTRACTOR_ACCRUAL : accrues
+    SUBCONTRACTOR ||--o{ SUBCONTRACTOR_ACCRUAL : "owed by"
+    SUBCONTRACTOR ||--o{ SUPPLIER_INVOICE : submits
+    SUPPLIER_INVOICE ||--o{ SUBCONTRACTOR_EXPENSE : finalizes
+    SUBCONTRACTOR_ACCRUAL ||--o| SUBCONTRACTOR_EXPENSE : "netted into"
+    SUBCONTRACTOR_EXPENSE }o--|| RATE_LINE_BUY : "for"
+
+    COMPANY ||--o{ FINANCIAL_YEAR : defines
+    FINANCIAL_YEAR ||--|{ FINANCIAL_PERIOD : "divided into"
+    INVOICE }o--|| FINANCIAL_PERIOD : "posted in"
+    SUBCONTRACTOR_EXPENSE }o--|| FINANCIAL_PERIOD : "posted in"
+    FINANCIAL_PERIOD ||--o{ DEBTORS_AGING_SNAPSHOT : "closes into"
+    CLIENT ||--o{ DEBTORS_AGING_SNAPSHOT : "aged at"
+
+    ROLE ||--o{ ROLE_FUNCTION : grants
+    FUNCTION ||--o{ ROLE_FUNCTION : "granted via"
+    USER_ACCOUNT ||--o{ USER_ROLE : holds
+    ROLE ||--o{ USER_ROLE : "held by"
+
+    API_CLIENT ||--o{ API_KEY : authenticates
+    COMPANY ||--o{ API_CLIENT : authorises
+
+    COMPANY ||--o{ ACCOUNTING_CONNECTION : authorises
+    ACCOUNTING_CONNECTION ||--o{ ACCOUNTING_MAPPING : configures
+</pre>
+        <div class="cap">Fig. 2 — Core entity relationships. Tenant (§4.1) is the outer, absolute SaaS boundary; reference data (Country, Currency, Unit of Measure) is shared across companies within it; transactional and master data is company-scoped. Note that rate lines attach to a leg's commodity or ancillary service lines (§5.5, §5.6), not to the leg itself — a leg can carry several of each, each priced independently. Invoicing, credit notes, and subcontractor expenses are detailed in §10.</div>
+      </div>
+
+      <h3><span class="secnum">5.1</span>Key entities</h3>
+      <div class="tablewrap">
+        <table>
+          <thead><tr><th>Entity</th><th>Purpose</th><th>Notable fields</th></tr></thead>
+          <tbody>
+            <tr><td>Tenant</td><td>An independent customer of the SaaS platform — the outer, absolute isolation boundary (§4.1); owns one or more Companies</td><td><span class="tag pk">Id</span> Name, PlanTier, Status (Active | Suspended | Cancelled), CreatedAt</td></tr>
+            <tr><td>Company</td><td>One of a Tenant's own operating legal entities — one per registered business per country; everything else hangs off it</td><td><span class="tag pk">Id</span> <span class="tag fk">TenantId</span>, LegalName, TradingName?, RegistrationNo, VatNumber, PhysicalAddress, PostalAddress, BankingDetails, InvoiceNumberPrefix, LogoUrl, <strong>InvoicingEnabled</strong> (bool), CountryId, <span class="tag fk">CurrencyId</span> (reporting)</td></tr>
+            <tr><td>Client</td><td>Customer the company contracts with and bills</td><td><span class="tag pk">Id</span> Name, RegistrationNo, <span class="tag fk">CurrencyId</span> (fixed — every invoice/rate for this client uses it), <strong>CreditLimit</strong>, PaymentTermsDays, DefaultCostCentreId?, Status (Active | Deactivated), CompanyId</td></tr>
+            <tr><td>Load</td><td>Customer's transport request</td><td><span class="tag pk">Id</span> ClientId, ReferenceNo, <span class="tag fk">LoadTypeId</span>, Status, PickupWindow, DeliveryWindow, TotalSellValue</td></tr>
+            <tr><td>LoadType</td><td>Shared reference list classifying how a load is run</td><td>Code (e.g. FTL, LTL, BULK, CONTAINER, REEFER, ABNORMAL), Description</td></tr>
+            <tr><td>LoadLeg</td><td>One movement within a load (a load may have several legs, e.g. collection → hub → final mile); carries one-or-more commodity lines and zero-or-more ancillary service lines (§5.5, §5.6) rather than a single price itself</td><td><span class="tag pk">Id</span> LoadId, SequenceNo, <span class="tag fk">OriginLocationId</span>, <span class="tag fk">DestinationLocationId</span>, ExecutionType (OwnFleet | Subcontracted), CostCentreId, VehicleId?, DriverId?, SubcontractorId?</td></tr>
+            <tr><td>Location</td><td>A named place used as a leg's origin or destination — no GPS/geocoding required, just a name scoped to province and country</td><td><span class="tag pk">Id</span> Name, Province, <span class="tag fk">CountryId</span>, CompanyId</td></tr>
+            <tr><td>RateLine</td><td>A single priced line against one commodity line or ancillary service line (§5.5, §5.6) — never against the leg directly, since each can be rated independently — one for sell, zero-or-one for buy. Currency is not stored here; it is resolved from the Client (sell) or Subcontractor (buy)</td><td><span class="tag pk">Id</span> SourceType (CommodityLine | AncillaryServiceLine), SourceId, Direction (Buy|Sell), RatePerUnit, UnitOfMeasureId, Quantity, Amount</td></tr>
+            <tr><td>UnitOfMeasure</td><td>Shared reference list</td><td>Code (e.g. PER_KM, PER_TON, PER_PALLET, PER_LOAD, PER_HOUR), Description</td></tr>
+            <tr><td>Vehicle</td><td>Company-owned truck or trailer</td><td><span class="tag pk">Id</span> Fleet No, Registration, Type (Horse|Trailer|Rigid), Make/Model, LicenceExpiry, VehicleTestExpiry, CompanyId</td></tr>
+            <tr><td>Driver</td><td>Company-employed driver</td><td><span class="tag pk">Id</span> EmployeeNo, Name, LicenceCode, LicenceExpiry, PDPExpiry, HomeCostCentreId, Status</td></tr>
+            <tr><td>Subcontractor</td><td>Third-party carrier used for outsourced legs</td><td><span class="tag pk">Id</span> Name, RegistrationNo, <span class="tag fk">CurrencyId</span> (fixed — every buy rate/expense for this carrier uses it), InsuranceExpiry, BankingDetails, PaymentTermsDays, Status (Active | Deactivated)</td></tr>
+            <tr><td>CostCentre</td><td>Financial allocation unit</td><td><span class="tag pk">Id</span> Code, Name, CompanyId, ParentCostCentreId (for hierarchy), Active</td></tr>
+            <tr><td>Debrief</td><td>Post-trip reconciliation that gates invoicing/payment</td><td><span class="tag pk">Id</span> LoadLegId, DriverId?, VehicleId?, OdometerStart/End, FuelLitres, PODReceived, SubmittedAt, Status</td></tr>
+            <tr><td>ExchangeRate</td><td>Daily FX rate</td><td>FromCurrencyId, ToCurrencyId, EffectiveDate, Rate</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="note" style="margin-top:14px;"><strong>Locations are named, not geocoded:</strong> a <span class="mono">Location</span> is a place name scoped to a province and a country (e.g. "Durban Harbour", KwaZulu-Natal, South Africa) — no latitude/longitude or address validation is required. This keeps capture fast for dispatchers and is sufficient for rating, lane reporting, and the load confirmation; a precise address or GPS pin can be layered in later per leg if telematics integration ever needs it, without changing this model.</div>
+
+      <h3><span class="secnum">5.2</span>Load status lifecycle</h3>
+      <p style="font-size:13.5px;max-width:70ch;">Every load carries a single governing <span class="mono">Status</span>, changed only through defined transitions — never edited directly — with each change recorded in <span class="mono">LoadStatusHistory</span> (who, when, from, to, reason) for audit. A load's status is the rollup of its legs: it cannot reach <em>Delivered</em> until every leg has been, and cannot reach <em>Closed</em> until every leg's financial document (invoice or subcontractor expense) is settled.</p>
+      <div class="diagram">
+<pre class="mermaid">
+flowchart LR
+    Q["Quoted"] --> B["Booked"]
+    B --> AL["Allocated"]
+    AL -->|"leg is Subcontracted"| ACCR["Accrual raised<br/>(buy side, §10.2)"]
+    AL --> IT["In Transit"]
+    IT --> DL["Delivered"]
+    DL --> POD["POD Received"]
+    POD -->|"company has<br/>invoicing enabled"| INV["Invoiced<br/>(sell side)"]
+    POD -->|"invoicing disabled —<br/>tracking only"| TRK["Tracked, not billed<br/>(sell side skipped)"]
+    ACCR --> MATCHED["Matched to supplier invoice,<br/>expense finalized (§10.2)"]
+    INV --> CL["Closed"]
+    TRK --> CL
+    MATCHED --> CL
+    B -.->|cancel| CX["Cancelled"]
+    AL -.->|cancel| CX
+    IT -.->|"query / dispute"| OH["On Hold"]
+    OH -.-> IT
+</pre>
+        <div class="cap">Fig. 3 — Load status lifecycle. A subcontracted leg's accrual starts as soon as it's Allocated — well before POD — and is settled independently of the sell side; §10 details both tracks.</div>
+      </div>
+      <div class="tablewrap" style="margin-top:14px;">
+        <table>
+          <thead><tr><th>Status</th><th>Meaning</th></tr></thead>
+          <tbody>
+            <tr><td>Quoted</td><td>A rate has been given; not yet a firm booking</td></tr>
+            <tr><td>Booked</td><td>Customer confirmed; not yet allocated to a vehicle/driver or subcontractor</td></tr>
+            <tr><td>Allocated</td><td>Every leg has an assigned vehicle/driver or subcontractor — a subcontracted leg raises its buy-side accrual the moment it reaches this status (see §10.2), independent of delivery</td></tr>
+            <tr><td>In Transit</td><td>At least one leg has commenced execution</td></tr>
+            <tr><td>Delivered</td><td>All legs physically delivered, awaiting POD confirmation</td></tr>
+            <tr><td>POD Received</td><td>Proof of delivery captured and debrief approved for every leg (see §09) — this is the gate that releases sell-side billing; the buy-side accrual is unaffected and continues to run on its own timeline</td></tr>
+            <tr><td>Invoiced</td><td>Sell-side invoice line(s) raised against the client — only reached if the owning company has invoicing enabled (see §10)</td></tr>
+            <tr><td>On Hold</td><td>Exception, query, or dispute pausing progress</td></tr>
+            <tr><td>Cancelled</td><td>Load called off before completion</td></tr>
+            <tr><td>Closed</td><td>Every applicable financial document is settled: client invoice (skipped entirely for tracking-only companies) and, where a leg was subcontracted, its accrual has been matched against a received supplier invoice and the resulting expense exported/paid (§10.2)</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h3><span class="secnum">5.3</span>Special equipment register</h3>
+      <p style="font-size:13.5px;max-width:70ch;">Tarpaulins, chains and load binders, straps, dollies, generator sets, reefer units, tracking devices, and other loose equipment are tracked as their own master data, independent of any one vehicle — because a physical item moves between vehicles over its life and needs its own condition and location history. Each item is <strong>issued</strong> to a vehicle and later <strong>returned</strong>; the current holder of any item is always a live query, never a manually-maintained field.</p>
+      <div class="tablewrap">
+        <table>
+          <thead><tr><th>Entity</th><th>Purpose</th><th>Notable fields</th></tr></thead>
+          <tbody>
+            <tr><td>Equipment</td><td>A single trackable item of special equipment</td><td><span class="tag pk">Id</span> AssetCode, Description, Category (Tarpaulin | ChainBinder | Strap | Dolly | GeneratorSet | ReeferUnit | TrackingDevice | Other), SerialNumber?, Status (Available | Issued | UnderRepair | Retired), CompanyId</td></tr>
+            <tr><td>EquipmentAssignment</td><td>One issue/return event linking an item to a vehicle</td><td><span class="tag pk">Id</span> <span class="tag fk">EquipmentId</span>, <span class="tag fk">VehicleId</span>, IssuedDate, IssuedByUserId, ConditionOnIssue, ReturnedDate?, ConditionOnReturn?, Status (Issued | Returned | Lost | Damaged)</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="note"><strong>Ties into debriefing:</strong> a leg's debrief (§09) is the natural point to confirm that equipment issued to the vehicle is still on board, or to log it lost/damaged — rather than running equipment checks as a separate process.</div>
+
+      <h3><span class="secnum">5.4</span>Credit control</h3>
+      <p style="font-size:13.5px;max-width:70ch;">Every <span class="mono">Client</span> carries a <span class="mono">CreditLimit</span> in its fixed billing currency (§04) — a hard ceiling on how much unpaid-plus-unbilled exposure the company will carry for that client at any one time. Exposure has two components: what's already been invoiced but not yet paid, and <strong>WIP</strong> — the sell value of every load for that client that hasn't reached <em>Invoiced</em> status yet (§5.2).</p>
+      <div class="tablewrap">
+        <table>
+          <thead><tr><th>Term</th><th>Definition</th></tr></thead>
+          <tbody>
+            <tr><td>AR Outstanding</td><td>Sum of Issued / Part Paid invoice balances for the client, net of any credit notes — the aged breakdown of this figure (Current, 30/60/90/90+ Days) is formalized in §10.3</td></tr>
+            <tr><td>WIP</td><td>Sum of the sell value of the client's loads still short of <em>Invoiced</em> — Booked, Allocated, In Transit, Delivered, POD Received, or On Hold</td></tr>
+            <tr><td>Total Exposure</td><td>AR Outstanding + WIP</td></tr>
+            <tr><td>Available Credit</td><td>CreditLimit − Total Exposure</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <ul style="font-size:13.5px;">
+        <li><strong>Hard stop:</strong> creating a new load, or increasing an existing load's sell value (e.g. adding a leg), is rejected outright by the API — not merely flagged in the UI — whenever it would push Total Exposure above CreditLimit. The check runs server-side on every channel that can create a load, including the customer portal and EDI integrations (§11), so it can't be bypassed by going around the main screen.</li>
+        <li>Because WIP moves into AR the instant a load is invoiced, and AR shrinks as invoices are paid, Available Credit recovers automatically as the pipeline progresses — nothing needs to be manually reset.</li>
+        <li>A narrow, function-gated override (<span class="mono">client.creditlimit.override</span>) lets a credit controller push a specific load through over the limit with a mandatory reason, fully audited; without that function, the stop is absolute.</li>
+        <li>Available Credit is also surfaced directly to the client through the Customer Portal (§13.2), so "why was my load rejected" is self-service rather than a support ticket.</li>
+      </ul>
+
+      <h3><span class="secnum">5.5</span>Commodities &amp; multi-product loads</h3>
+      <p style="font-size:13.5px;max-width:70ch;">A leg isn't always one product at one rate. A fuel tanker delivering 20,000 litres of diesel and 8,000 litres of petrol on the same trip needs both quantities captured separately, and — because the two commodities are very often priced differently — rated separately too. Every leg carries one or more <span class="mono">CommodityLine</span>s instead of a single price; a general-cargo leg is simply the common case of exactly one.</p>
+      <ul style="font-size:13.5px;">
+        <li><span class="mono">Commodity</span> is company-level master data (its own screen) — diesel, ULP95 petrol, paraffin, or non-fuel product lines like cement or grain — each with a default unit of measure, so "litres" is never hand-typed for a fuel commodity.</li>
+        <li>Each <span class="mono">CommodityLine</span> on a leg records what was actually carried — the commodity and the quantity — and carries its own sell <span class="mono">RateLine</span> and, where relevant, its own buy <span class="mono">RateLine</span> (§08). Two commodities on the same leg can be priced on completely different bases (e.g. diesel per litre, a dry-goods pallet on the same run per pallet).</li>
+        <li>A load/leg's total sell value (used throughout §5.2's status lifecycle and §5.4's credit check) is the sum of every commodity line's sell amount, not a single figure entered once.</li>
+      </ul>
+      <div class="tablewrap">
+        <table>
+          <thead><tr><th>Entity</th><th>Purpose</th><th>Notable fields</th></tr></thead>
+          <tbody>
+            <tr><td>Commodity</td><td>A product the company moves — the master catalogue</td><td><span class="tag pk">Id</span> Code, Name, DefaultUnitOfMeasureId, Category (Fuel | BulkLiquid | DryBulk | BreakBulk | General), Active, CompanyId</td></tr>
+            <tr><td>CommodityLine</td><td>One commodity, and its quantity, carried on a leg</td><td><span class="tag pk">Id</span> <span class="tag fk">LoadLegId</span>, <span class="tag fk">CommodityId</span>, Quantity, UnitOfMeasureId, SequenceNo</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h3><span class="secnum">5.6</span>Ancillary services (e.g. armed escort)</h3>
+      <p style="font-size:13.5px;max-width:70ch;">Some legs need more than moving the commodity — a fuel run through a high-risk corridor might require an armed escort; others might need an abnormal-load permit or fumigation. These are billable to the client like anything else, and where the service is outsourced, they generate exactly the same kind of subcontracted cost as running the leg itself.</p>
+      <ul style="font-size:13.5px;">
+        <li>An <span class="mono">AncillaryServiceType</span> is company-level reference data (Armed Escort, Abnormal Permit, Fumigation, …). A leg can carry zero or more <span class="mono">AncillaryServiceLine</span>s alongside its commodity lines.</li>
+        <li>Each ancillary service line has its own sell <span class="mono">RateLine</span> — the client is billed for the escort as its own charge, not folded into the freight rate — and, if the service is outsourced (e.g. to a security company held as a <span class="mono">Subcontractor</span> record), its own buy <span class="mono">RateLine</span>.</li>
+        <li>An outsourced ancillary service runs through the identical accrual → supplier-invoice-matching pipeline already built for transport subcontracting (§10.2) — the accrual and expense simply reference this line's buy <span class="mono">RateLine</span> rather than the transport one, so a single leg can owe two different subcontractors (the carrier and the escort provider) independently, each reconciled against their own invoice.</li>
+      </ul>
+      <div class="tablewrap">
+        <table>
+          <thead><tr><th>Entity</th><th>Purpose</th><th>Notable fields</th></tr></thead>
+          <tbody>
+            <tr><td>AncillaryServiceType</td><td>Reference list of billable extra services</td><td><span class="tag pk">Id</span> Code, Name (e.g. ArmedEscort, AbnormalPermit, Fumigation), CompanyId</td></tr>
+            <tr><td>AncillaryServiceLine</td><td>One instance of a service required on a leg</td><td><span class="tag pk">Id</span> <span class="tag fk">LoadLegId</span>, <span class="tag fk">AncillaryServiceTypeId</span>, Description, SubcontractorId? (provider, if outsourced)</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- 06 MODULES -->
+    <section id="modules">
+      <h2><span class="secnum">06</span>Module Breakdown</h2>
+      <div class="grid2">
+        <div class="card">
+          <h4>Company / Tenant Master</h4>
+          <p style="font-size:13.5px;margin:6px 0 0;">Legal/trading name, registration and VAT numbers, addresses, banking details, invoice numbering and logo, per operating company — the letterhead data every invoice, credit note, and load confirmation is built from (see §5.1, §10). Also carries the invoicing on/off switch for companies that only need load and subcontractor-cost tracking (§10).</p>
+        </div>
+        <div class="card">
+          <h4>Load &amp; Dispatch</h4>
+          <p style="font-size:13.5px;margin:6px 0 0;">Load capture (classified by load type — FTL, LTL, bulk, container…), leg planning against named origin/destination locations (province + country, no GPS needed), allocation to own vehicle/driver or subcontractor, governed status lifecycle (see §5.2), POD capture. Every load creation/value change passes the client's credit check (§5.4) before it's accepted.</p>
+        </div>
+        <div class="card">
+          <h4>Credit Control</h4>
+          <p style="font-size:13.5px;margin:6px 0 0;">Per-client credit limit enforced as a hard stop at load creation; exposure = outstanding AR + WIP (every load not yet invoiced) — see §5.4.</p>
+        </div>
+        <div class="card">
+          <h4>Vehicle &amp; Trailer Master</h4>
+          <p style="font-size:13.5px;margin:6px 0 0;">Fleet register, licence/permit/service expiry tracking with alerts, vehicle–trailer pairing history, ownership/lease terms, telematics device linkage.</p>
+        </div>
+        <div class="card">
+          <h4>Special Equipment Register</h4>
+          <p style="font-size:13.5px;margin:6px 0 0;">Master data for tarpaulins, chains, straps, dollies, generators, reefer units, and tracking devices; issue-to and return-from vehicle history, condition tracking, lost/damaged/repair status (see §5.3).</p>
+        </div>
+        <div class="card">
+          <h4>Driver Master</h4>
+          <p style="font-size:13.5px;margin:6px 0 0;">Driver profiles, licence codes and expiries, medicals, disciplinary history, home cost centre, availability/leave calendar.</p>
+        </div>
+        <div class="card">
+          <h4>Subcontractor Management</h4>
+          <p style="font-size:13.5px;margin:6px 0 0;">Carrier onboarding, compliance documents (insurance, operating licence), default buy rate cards, accrual-basis payables with supplier invoice matching (see §10.2).</p>
+        </div>
+        <div class="card">
+          <h4>Commodity Master</h4>
+          <p style="font-size:13.5px;margin:6px 0 0;">Product catalogue — diesel, petrol, paraffin, bulk/dry goods — each with a default unit of measure and category, so a leg can carry several differently-priced products (see §5.5).</p>
+        </div>
+        <div class="card">
+          <h4>Rating &amp; Costing</h4>
+          <p style="font-size:13.5px;margin:6px 0 0;">Sell rate cards per client/lane/UoM, buy rate cards per subcontractor/lane/UoM, priced per commodity or ancillary service line rather than per leg, automatic margin calculation, currency-aware pricing (see §08).</p>
+        </div>
+        <div class="card">
+          <h4>Cost Centre &amp; Finance Linkage</h4>
+          <p style="font-size:13.5px;margin:6px 0 0;">Cost centre hierarchy per company, allocation of every leg's revenue/cost to a cost centre, exportable journals for the general ledger.</p>
+        </div>
+        <div class="card">
+          <h4>Financial Calendar &amp; Debtors Roll-Over</h4>
+          <p style="font-size:13.5px;margin:6px 0 0;">Financial years and periods with explicit opening/closing dates per company; period close rolls every client's aged-debtors buckets forward and opens the next period — see §10.3.</p>
+        </div>
+        <div class="card">
+          <h4>Driver Debriefing</h4>
+          <p style="font-size:13.5px;margin:6px 0 0;">Post-trip capture and exception handling — see §09 for the full workflow.</p>
+        </div>
+        <div class="card">
+          <h4>Users, Roles &amp; API Access</h4>
+          <p style="font-size:13.5px;margin:6px 0 0;">Internal identity provider, function-based permissions, API client/key issuance for external integrations, plus scoped portal identities for client and subcontractor contacts — see §07 and §13.</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- 07 RBAC -->
+    <section id="rbac">
+      <h2><span class="secnum">07</span>Users, Roles &amp; Functions</h2>
+      <p class="lede">Permissions are never assigned to a user directly. A <strong>Function</strong> is a discrete capability (e.g. <span class="mono">load.create</span>, <span class="mono">rate.override</span>, <span class="mono">debrief.approve</span>); a <strong>Role</strong> is a named bundle of functions; a user holds one or more roles, scoped per company.</p>
+      <div class="diagram">
+<pre class="mermaid">
+flowchart LR
+    U["User Account"] -->|assigned per company| UR["UserRole"]
+    UR --> R["Role<br/>e.g. Dispatcher, Finance Clerk,<br/>Fleet Controller, Admin"]
+    R --> RF["RoleFunction"]
+    RF --> F["Function<br/>e.g. load.create, rate.override,<br/>debrief.approve, audit.view"]
+    F -.enforced by.-> MW["API authorization middleware<br/>(per-endpoint function check)"]
+</pre>
+        <div class="cap">Fig. 4 — Roles are configurable by an admin at runtime; new functions are registered by the API as new endpoints ship, so permission checks stay declarative rather than hard-coded per role.</div>
+      </div>
+      <div class="grid2" style="margin-top:16px;">
+        <div class="card">
+          <h4 style="margin-bottom:6px;">Design points</h4>
+          <ul style="font-size:13.5px;">
+            <li>Every API endpoint declares the function(s) it requires; middleware checks the caller's resolved function set from their role(s).</li>
+            <li>Roles are company-scoped — the same person can be a Dispatcher in one country and view-only in another — but always within one Tenant; no role, including admin roles, is able to cross a tenant boundary (§4.1).</li>
+            <li>A super-admin role manages roles/functions/company assignment itself, gated by its own function.</li>
+            <li>Two further identity types — <span class="mono">ClientContact</span> and <span class="mono">SubcontractorContact</span> — reuse this same Role/Function model but are scoped to a single party rather than a Company; see §13.1.</li>
+          </ul>
+        </div>
+        <div class="card">
+          <h4 style="margin-bottom:6px;">Starter roles</h4>
+          <ul style="font-size:13.5px;">
+            <li><strong>Dispatcher</strong> — create/allocate loads, view fleet availability</li>
+            <li><strong>Fleet Controller</strong> — vehicle/driver master maintenance</li>
+            <li><strong>Finance Clerk</strong> — rate cards, cost centres, invoicing exports, financial period close (§10.3)</li>
+            <li><strong>Credit Controller</strong> — set client credit limits, override the credit hard stop (§5.4) with a logged reason</li>
+            <li><strong>Debrief Clerk</strong> — process debriefs, flag exceptions</li>
+            <li><strong>Integration Service</strong> — non-interactive, API-key based</li>
+            <li><strong>Platform Support</strong> — our own operations staff only; narrow, break-glass, cross-tenant access, never assignable to a customer user, fully audited (§4.1, §12)</li>
+          </ul>
+        </div>
+      </div>
+    </section>
+
+    <!-- 08 RATING -->
+    <section id="rates">
+      <h2><span class="secnum">08</span>Rating &amp; Costing</h2>
+      <p class="lede">Every commodity line and every ancillary service line on a leg (§5.5, §5.6) carries up to two priced lines: what the client is charged (<strong>sell</strong>) and, when the line's work is subcontracted, what the provider is paid (<strong>buy</strong>). Each side has its own rate, currency, and unit of measure — they don't have to match, and neither do two commodities on the same leg.</p>
+      <div class="tablewrap">
+        <table>
+          <thead><tr><th>Unit of measure</th><th>Typical use</th><th>Example</th></tr></thead>
+          <tbody>
+            <tr><td>Per load</td><td>Flat-rate full truckload</td><td>R 8,500.00 / load</td></tr>
+            <tr><td>Per kilometre</td><td>Long-haul linehaul</td><td>R 14.20 / km</td></tr>
+            <tr><td>Per ton</td><td>Bulk commodities</td><td>USD 22.00 / ton</td></tr>
+            <tr><td>Per pallet</td><td>FMCG distribution</td><td>R 95.00 / pallet</td></tr>
+            <tr><td>Per hour</td><td>Local/ad-hoc hire</td><td>R 320.00 / hour</td></tr>
+            <tr><td>Per litre</td><td>Fuel/bulk liquid commodities</td><td>R 0.18 / litre</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="note" style="margin-bottom:16px;"><strong>Example:</strong> a single leg delivering diesel and petrol to the same site raises two commodity lines — 20,000 litres of diesel at R 0.18/litre and 8,000 litres of petrol at R 0.21/litre — each with its own sell rate, and, if the run is subcontracted, its own buy rate. If it also needs an armed escort, that's a third line, priced and costed independently again (§5.6).</div>
+      <h3><span class="secnum">8.1</span>Margin calculation</h3>
+      <p style="font-size:13.5px;max-width:70ch;">Sell Amount and Buy Amount are each computed per line, in their own transaction currency (<span class="mono">Rate × Quantity</span>). Margin per line is derived by converting Buy to the Sell currency using the exchange rate effective on the load's execution date, then <span class="mono">Margin = SellAmount − BuyAmount(converted)</span>; a leg's total margin is the sum across all of its commodity and ancillary service lines. The conversion rate used is stored on the line at debrief/invoicing time so historic margin reporting never drifts when FX rates later change.</p>
+      <div class="note"><strong>Own-fleet legs</strong> still carry an internal "buy" cost, computed from a standard cost-per-km/hour table per vehicle class, so margin reporting is consistent whether a leg is run in-house or outsourced.</div>
+
+      <h3><span class="secnum">8.2</span>Subcontractor load confirmation</h3>
+      <p style="font-size:13.5px;max-width:70ch;">The moment a leg's <span class="mono">ExecutionType</span> is set to <em>Subcontracted</em> and a <span class="mono">SubcontractorId</span> is assigned — i.e. as soon as the leg reaches <em>Allocated</em> (§5.2) — the system generates a <strong>Load Confirmation</strong>: the carrier's written instruction to run the leg, and formal proof of the rate agreed, issued before execution starts.</p>
+      <ul style="font-size:13.5px;">
+        <li>Letterhead pulls straight from the <span class="mono">Company</span> master (§5.1) — legal name, address, registration and VAT numbers — and is addressed to the subcontractor.</li>
+        <li>Body shows the load/leg reference, origin and destination, pickup and delivery windows, and every commodity or ancillary service line this subcontractor is responsible for, each with its own agreed <span class="mono">RateLineBuy</span> (rate, unit of measure, quantity, and total, in the subcontractor's fixed currency) — so a carrier running a multi-product fuel leg sees the rate for each product separately, and a security provider handling only the escort sees just that line.</li>
+        <li>Issued as a PDF — emailed to the subcontractor and retrievable via the API — with an optional acknowledgement step before dispatch is allowed to proceed, configurable per company. In practice this acknowledgement happens through the Supplier Portal (§13.3), where the confirmation is the first thing a subcontractor contact sees.</li>
+        <li>Issuing the confirmation is also the trigger point for the buy-side accrual (§10.2) — the company's liability to the subcontractor is recognised here, not weeks later when their invoice eventually arrives.</li>
+      </ul>
+      <div class="tablewrap">
+        <table>
+          <thead><tr><th>Entity</th><th>Notable fields</th></tr></thead>
+          <tbody>
+            <tr><td>LoadConfirmation</td><td><span class="tag pk">Id</span> <span class="tag fk">LoadLegId</span>, SubcontractorId, DocumentNumber, IssuedDate, Status (Issued | Acknowledged | Declined), PdfUrl</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- 09 DEBRIEF -->
+    <section id="debrief">
+      <h2><span class="secnum">09</span>Driver Debriefing</h2>
+      <p class="lede">Debriefing closes the loop on a completed leg: reconciling what was planned against what actually happened, before a leg can be invoiced or a subcontractor paid. Debrief covers both own-fleet legs (driver-submitted) and subcontracted legs (POD and any additional claims lodged by/for the carrier).</p>
+      <div class="diagram">
+<pre class="mermaid">
+flowchart LR
+    A["Leg marked<br/>Delivered"] --> B["Driver/clerk<br/>captures debrief"]
+    B --> C{"Exceptions?<br/>(odometer, fuel,<br/>POD, incident)"}
+    C -->|none| D["Auto-approved"]
+    C -->|flagged| E["Routed to<br/>Debrief Clerk"]
+    E --> F["Clerk resolves<br/>or escalates"]
+    D --> G["Leg locked as<br/>POD Received"]
+    F --> G
+    G --> H["§10 — invoice line /<br/>subcontractor expense generated"]
+</pre>
+        <div class="cap">Fig. 5 — Debrief approval is the gate: a leg cannot be billed to the client or paid to a subcontractor until it is Approved. What happens on approval is detailed next.</div>
+      </div>
+      <div class="grid2" style="margin-top:16px;">
+        <div class="card">
+          <h4 style="margin-bottom:6px;">Captured on debrief</h4>
+          <ul style="font-size:13.5px;">
+            <li>Odometer start/end, fuel litres and cost</li>
+            <li>Proof of delivery (photo/signature upload)</li>
+            <li>Trip expenses — one or more lines, each categorized and with its own receipt image (see §9.1)</li>
+            <li>Incidents (delay, damage, breakdown) with severity and narrative</li>
+            <li>Hours of service / driving-time compliance check</li>
+            <li>For subcontracted legs, POD may be attached directly by the carrier through the Supplier Portal (§13.3) — it lands on this same Debrief record rather than bypassing it, so exception rules below still apply.</li>
+          </ul>
+        </div>
+        <div class="card">
+          <h4 style="margin-bottom:6px;">Exception triggers</h4>
+          <ul style="font-size:13.5px;">
+            <li>Odometer distance deviates &gt;10% from planned route distance</li>
+            <li>Missing POD</li>
+            <li>Fuel consumption outside the vehicle's expected range</li>
+            <li>Any logged incident</li>
+            <li>Driving hours exceeding the regulatory limit</li>
+          </ul>
+        </div>
+      </div>
+
+      <h3><span class="secnum">9.1</span>Trip &amp; incidental expenses</h3>
+      <p style="font-size:13.5px;max-width:70ch;">A single trip rarely generates just one incidental cost — tolls, an overnight stay, a truck stop, weighbridge fees — so a debrief carries as many <span class="mono">DebriefExpense</span> lines as actually happened, each categorized against company-level <span class="mono">ExpenseType</span> reference data rather than a free-text note.</p>
+      <ul style="font-size:13.5px;">
+        <li>Typical categories: Toll, Overnight Accommodation (a "sleepover"), Truck Stop, Weighbridge, Parking, Subsistence, Other — each company maintains its own list.</li>
+        <li>For an <strong>own-fleet</strong> leg, expense lines feed the driver's reimbursement/petty-cash process and are allocated to the leg's cost centre (§06).</li>
+        <li>For a <strong>subcontracted</strong> leg, an expense line can instead be marked as a claim against the carrier's accrual — it adjusts the open <span class="mono">SubcontractorAccrual</span> (§10.2) rather than being reimbursed internally, exactly like the detention/waiting-time extras already described there.</li>
+      </ul>
+      <div class="tablewrap">
+        <table>
+          <thead><tr><th>Entity</th><th>Notable fields</th></tr></thead>
+          <tbody>
+            <tr><td>ExpenseType</td><td><span class="tag pk">Id</span> Code, Name (e.g. Toll, Overnight, TruckStop, Weighbridge, Parking, Subsistence, Other), CompanyId</td></tr>
+            <tr><td>DebriefExpense</td><td><span class="tag pk">Id</span> <span class="tag fk">DebriefId</span>, <span class="tag fk">ExpenseTypeId</span>, Description, Amount, CurrencyId, ReceiptImageUrl, ClaimedAgainst (Company | SubcontractorAccrual)</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- 10 BILLING -->
+    <section id="billing">
+      <h2><span class="secnum">10</span>Invoicing, Credit Notes &amp; Subcontractor Payables</h2>
+      <p class="lede">The sell side and the buy side run on different clocks. The <strong>sell side</strong> waits for POD and debrief approval (§09) before anything is billed, and only runs at all when the owning <span class="mono">Company</span> has <span class="mono">InvoicingEnabled</span> switched on. The <strong>buy side</strong> runs on an <strong>accrual basis</strong>: the liability is recognised the moment a leg is issued to a subcontractor — long before POD — and is only settled once the subcontractor's own invoice is received and matched (§10.2).</p>
+      <div class="diagram">
+<pre class="mermaid">
+flowchart LR
+    ALLOC["Leg Allocated<br/>to Subcontractor"] --> ACCR["Accrual raised<br/>(§10.2)"]
+    ACCR --> MATCH["Supplier invoice received &amp;<br/>matched → expense finalized (§10.2)"]
+    MATCH --> EXPORTED["Exported to AP/GL,<br/>then paid"]
+
+    DA["Debrief<br/>Approved"] --> SELL{"Company has<br/>InvoicingEnabled?"}
+    SELL -->|"Yes"| INVL["Invoice line added to<br/>Client's draft invoice<br/>(Client's fixed currency)"]
+    SELL -->|"No — tracking only"| NOBILL["Sell side skipped —<br/>load tracked, not billed"]
+    INVL --> ISSUE["Invoice issued<br/>to client"]
+    ISSUE -->|"dispute / short-delivery"| CN["Credit note issued"]
+    ISSUE --> PAID["Invoice paid"]
+
+    PAID --> CLOSE["Load leg<br/>financially closed"]
+    NOBILL --> CLOSE
+    EXPORTED --> CLOSE
+</pre>
+        <div class="cap">Fig. 6 — The buy-side accrual starts at allocation, independent of POD/debrief; a load only reaches Closed (§5.2) once every track applicable to it — sell and buy — is settled.</div>
+      </div>
+      <div class="note"><strong>Load-tracking-only mode:</strong> setting <span class="mono">Company.InvoicingEnabled = false</span> disables invoice/credit-note generation platform-wide for that company — useful for an operation that manages loads and pays subcontractors through this system but bills its own clients through a separate finance system. Subcontractor accrual and expense processing (§10.2) is entirely unaffected, since it depends only on a leg's execution type, never on this flag.</div>
+
+      <h3><span class="secnum">10.1</span>Sell side — invoices &amp; credit notes</h3>
+      <ul style="font-size:13.5px;">
+        <li>Invoices are raised per <span class="mono">Client</span>, in that client's fixed currency, aggregating one line per approved commodity or ancillary service line (§5.5, §5.6) — so a multi-product fuel delivery with an escort produces one invoice with a line per product plus a line for the escort, not one blended figure — either on a scheduled run (e.g. daily) or on demand. The invoice header (legal name, address, registration and VAT numbers, banking details) is pulled from the issuing <span class="mono">Company</span>'s master data (§5.1, §06) — never re-typed per invoice.</li>
+        <li>Invoice lifecycle: <span class="pill accent">Draft</span> → <span class="pill accent">Issued</span> → <span class="pill warn">Part Paid</span> / <span class="pill good">Paid</span>, with <span class="pill bad">Overdue</span> derived from due date. Void/cancel is only permitted while still Draft.</li>
+        <li>A <strong>credit note</strong> adjusts an issued invoice — rate disputes, short-delivery, damage claims — always linked back to the invoice line(s) it corrects, in the same client currency. Raising one requires the <span class="mono">finance.creditnote.approve</span> function, since it reduces recognised revenue.</li>
+        <li>A standalone credit note (not tied to a prior invoice) is supported for goodwill/ad-hoc adjustments, but still requires the same approval function.</li>
+        <li>Issued invoices and credit notes are visible directly to the client through the Customer Portal (§13.2) — no separate export or emailing step required for the client to see their own statement.</li>
+      </ul>
+      <div class="tablewrap">
+        <table>
+          <thead><tr><th>Entity</th><th>Notable fields</th></tr></thead>
+          <tbody>
+            <tr><td>Invoice</td><td><span class="tag pk">Id</span> InvoiceNumber, ClientId, <span class="tag fk">FinancialPeriodId</span>, IssueDate, DueDate, Status, TotalExVat, VatAmount, TotalIncVat, PdfUrl? <span style="color:var(--ink-faint);">(currency = Client.CurrencyId; PdfUrl set once, at Issued — see §11.6)</span></td></tr>
+            <tr><td>InvoiceLine</td><td><span class="tag pk">Id</span> InvoiceId, <span class="tag fk">RateLineSellId</span>, Description, Quantity, UnitOfMeasureId, Rate, Amount</td></tr>
+            <tr><td>CreditNote</td><td><span class="tag pk">Id</span> CreditNoteNumber, ClientId, OriginalInvoiceId?, Reason, IssueDate, Status, TotalAmount, PdfUrl? <span style="color:var(--ink-faint);">(currency = Client.CurrencyId; PdfUrl set once, at Issued — see §11.6)</span></td></tr>
+            <tr><td>CreditNoteLine</td><td><span class="tag pk">Id</span> CreditNoteId, InvoiceLineId?, Description, Amount</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h3><span class="secnum">10.2</span>Buy side — accrual, supplier invoice matching &amp; subcontractor expenses</h3>
+      <p style="font-size:13.5px;max-width:70ch;">The buy side is run on an <strong>accrual basis</strong>, not a self-billing one: the company's liability is recognised the moment a load is issued to the subcontractor, and only cleared once the subcontractor's own invoice has actually been received and processed. This keeps outstanding subcontractor liability visible in the accounts in real time, rather than appearing weeks later when paperwork finally arrives.</p>
+      <div class="diagram">
+<pre class="mermaid">
+flowchart LR
+    A["Leg Allocated<br/>to Subcontractor"] --> ACCR["Accrual raised —<br/>buy rate line estimate"]
+    DBA["Debrief-approved<br/>extras (§09)"] -.->|"adjusts"| ACCR
+    ACCR --> WAIT["Awaiting supplier<br/>invoice"]
+    SUPINV["Supplier invoice<br/>received &amp; captured"] --> MATCHSTEP["Matched to leg(s)<br/>&amp; accrual"]
+    WAIT --> MATCHSTEP
+    MATCHSTEP --> VAR{"Amount matches<br/>accrual?"}
+    VAR -->|"yes"| NET["Accrual netted off"]
+    VAR -->|"variance"| FLAG["Flagged for<br/>finance review"]
+    FLAG --> NET
+    NET --> FINAL["Subcontractor Expense finalized —<br/>status: Available to Export"]
+    FINAL --> EXPORT["Exported to AP/GL"]
+    EXPORT --> PAID["Paid"]
+</pre>
+        <div class="cap">Fig. 7 — The accrual can sit open for as long as the subcontractor takes to invoice; a leg's buy-side liability is never invisible in the meantime, and only becomes exportable once matched.</div>
+      </div>
+      <ul style="font-size:13.5px;">
+        <li>The moment a leg's <span class="mono">ExecutionType</span> is <em>Subcontracted</em> and it reaches <em>Allocated</em> (§5.2), a <span class="mono">SubcontractorAccrual</span> is raised against each buy <span class="mono">RateLine</span> that has a subcontractor attached — the transport itself, and separately any outsourced ancillary service line such as an armed escort (§5.6) — each in that provider's own fixed currency, as a provisional liability, not yet a payable. A single leg can therefore owe two different subcontractors independently, reconciled against two different supplier invoices.</li>
+        <li>Debrief-approved extras (detention, waiting time — §09) adjust the open accrual's estimate.</li>
+        <li>When the subcontractor's actual invoice arrives, it is captured as a <span class="mono">SupplierInvoice</span> and matched against the relevant leg(s) and accrual(s) — one-to-one for a single-leg invoice, or one-to-many where a subcontractor bills several legs together.</li>
+        <li>Matching (an AP function, gated by <span class="mono">finance.subcontractorinvoice.process</span>) atomically nets off the accrual and finalizes the <span class="mono">SubcontractorExpense</span> at the actual invoiced amount. Only at that point does the expense become <span class="pill accent">Available to Export</span> — eligible for the AP/GL export run and a payment run.</li>
+        <li>A variance between the accrual estimate and the actual invoice is flagged for review rather than silently absorbed, so it can't quietly distort margin reporting.</li>
+      </ul>
+      <div class="tablewrap">
+        <table>
+          <thead><tr><th>Entity</th><th>Notable fields</th></tr></thead>
+          <tbody>
+            <tr><td>SubcontractorAccrual</td><td><span class="tag pk">Id</span> <span class="tag fk">RateLineBuyId</span>, SubcontractorId, AccrualDate, EstimatedAmount, Status (Accrued | Netted) <span style="color:var(--ink-faint);">(currency = Subcontractor.CurrencyId)</span></td></tr>
+            <tr><td>SupplierInvoice</td><td><span class="tag pk">Id</span> SubcontractorId, SupplierInvoiceNumber, InvoiceDate, ReceivedDate, Amount, Status (Received | Matched | Disputed) <span style="color:var(--ink-faint);">(currency = Subcontractor.CurrencyId)</span></td></tr>
+            <tr><td>SubcontractorExpense</td><td><span class="tag pk">Id</span> SubcontractorId, <span class="tag fk">RateLineBuyId</span>, <span class="tag fk">AccrualId</span>, <span class="tag fk">SupplierInvoiceId</span>, <span class="tag fk">FinancialPeriodId</span>, Amount, Status (AvailableToExport | Exported | Paid), FinalizedDate <span style="color:var(--ink-faint);">(currency = Subcontractor.CurrencyId)</span></td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h3><span class="secnum">10.3</span>Financial calendar &amp; debtors roll-over</h3>
+      <p style="font-size:13.5px;max-width:70ch;">Every <span class="mono">Company</span> runs its own financial calendar — a <span class="mono">FinancialYear</span> divided into <span class="mono">FinancialPeriod</span>s, each with an explicit opening and closing date — because invoicing, credit notes, and subcontractor expenses all need to post against a period, not just a date, for period-end reporting and reconciliation to mean anything.</p>
+      <ul style="font-size:13.5px;">
+        <li>A financial year need not follow the calendar year (a South African company's tax year, for instance, commonly runs March–February) and is divided into periods — typically 12, sometimes 13 with a stub/adjustment period. Exactly one period per Company is ever <span class="pill accent">Open</span> at a time; every Invoice, Credit Note, and Subcontractor Expense records the period it falls into automatically, resolved from its date rather than hand-picked.</li>
+        <li><strong>Period close</strong> is a function-gated action (<span class="mono">finance.period.close</span>) and, like every other approval boundary in this design (§09, §10.1, §10.2), is one-directional: once a period is <span class="pill warn">Closed</span>, nothing new can post into it — a correction afterwards is always a new document in the next open period, never a backdated edit.</li>
+        <li>Closing a period and opening the next happen as one operation, so there is never a gap where no period is open and a new invoice would have nowhere to post.</li>
+      </ul>
+      <p style="font-size:13.5px;max-width:70ch;"><strong>Pre-close checklist:</strong> closing isn't a single unconditional click. Before confirming, the Finance Clerk sees what's still outstanding for the period about to close — a soft gate, not a hard block, since some of these are genuinely outside the company's control (a subcontractor's invoice hasn't arrived yet is a fact, not an error):</p>
+      <div class="tablewrap">
+        <table>
+          <thead><tr><th>Checked</th><th>Why it matters</th></tr></thead>
+          <tbody>
+            <tr><td>Draft invoices not yet issued for legs already POD Received in this period</td><td>Revenue for delivered work that's about to become invisible to this period's reporting</td></tr>
+            <tr><td>Subcontractor accruals still <span class="pill accent">Accrued</span> (unmatched) for legs delivered in this period</td><td>Real liability sitting in the calendar's oldest open period — worth knowing about, not necessarily worth waiting for</td></tr>
+            <tr><td>Open Exceptions (§16.1) tied to transactions dated in this period</td><td>An unresolved debrief exception or accrual variance may still change what should have been posted</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <ul style="font-size:13.5px;">
+        <li>Proceeding with items still outstanding requires an explicit acknowledgement, not just a click-through — the count and the closer's decision to continue anyway are captured on the close event and audited (§12), so "we closed early knowing three accruals were still open" is a recorded fact, not a later surprise.</li>
+        <li>None of this changes what closing actually does (§10.3 above) — it's a checklist in front of the same one-directional action, not a new state.</li>
+      </ul>
+      <p style="font-size:13.5px;max-width:70ch;"><strong>Debtors roll-over:</strong> closing a period is also the moment every Client's aged-debtors position rolls forward by one bucket. The "AR Outstanding" figure that feeds credit control (§5.4) is really an aging analysis under the surface, not one lump number:</p>
+      <div class="tablewrap">
+        <table>
+          <thead><tr><th>Bucket</th><th>On period close, becomes</th></tr></thead>
+          <tbody>
+            <tr><td>Current</td><td>Rolls into "30 Days"</td></tr>
+            <tr><td>30 Days</td><td>Rolls into "60 Days"</td></tr>
+            <tr><td>60 Days</td><td>Rolls into "90 Days"</td></tr>
+            <tr><td>90 Days</td><td>Rolls into "90+ Days"</td></tr>
+            <tr><td>90+ Days</td><td>Stays "90+ Days"</td></tr>
+            <tr><td style="color:var(--ink-faint);">(new)</td><td>Invoices raised in the newly-opened period become the new "Current"</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <ul style="font-size:13.5px;">
+        <li>A <span class="mono">DebtorsAgingSnapshot</span> is written per Client at every period close — a permanent, period-stamped record of that client's aged balance at exactly that point, so an aged-debtors report for a past period is a lookup, not a recalculation against today's data.</li>
+        <li>The roll-over doesn't change how Available Credit (§5.4) works day-to-day — that stays a live, real-time figure recalculated on every load. The snapshot is the historical record of what it was at each period boundary, for reporting and audit (§12).</li>
+      </ul>
+      <div class="tablewrap">
+        <table>
+          <thead><tr><th>Entity</th><th>Notable fields</th></tr></thead>
+          <tbody>
+            <tr><td>FinancialYear</td><td><span class="tag pk">Id</span> <span class="tag fk">CompanyId</span>, YearLabel, StartDate, EndDate, Status (Open | Closed)</td></tr>
+            <tr><td>FinancialPeriod</td><td><span class="tag pk">Id</span> <span class="tag fk">FinancialYearId</span>, PeriodNumber, Name, StartDate, EndDate, Status (Future | Open | Closed)</td></tr>
+            <tr><td>DebtorsAgingSnapshot</td><td><span class="tag pk">Id</span> <span class="tag fk">ClientId</span>, <span class="tag fk">FinancialPeriodId</span>, CurrentAmount, Days30, Days60, Days90, Days90Plus, TotalOutstanding, SnapshotDate</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- 11 API -->
+    <section id="api">
+      <h2><span class="secnum">11</span>API &amp; Integration</h2>
+      <p class="lede">A versioned REST API is the only way in or out of the platform for external systems — customer portals, subcontractor self-billing, telematics feeds, and the finance ERP all integrate the same way staff do internally.</p>
+      <h3><span class="secnum">11.1</span>Authentication</h3>
+      <ul style="font-size:13.5px;">
+        <li><strong>Interactive users</strong> — JWT bearer tokens issued after ASP.NET Core Identity login, short-lived with refresh tokens. This covers internal staff, and — with a fixed <span class="mono">ClientId</span> or <span class="mono">SubcontractorId</span> claim baked into the token — the Customer and Supplier Portals (§13.1) too.</li>
+        <li><strong>System-to-system</strong> — OAuth2 client-credentials grant per integration partner, scoped to specific functions via the same role/function model (§07), to a single Tenant, and with per-client rate limits.</li>
+        <li>All API access is logged with client id, function invoked, and payload hash for audit.</li>
+      </ul>
+      <h3><span class="secnum">11.2</span>Representative endpoints</h3>
+      <div class="tablewrap">
+        <table>
+          <thead><tr><th>Method &amp; path</th><th>Purpose</th></tr></thead>
+          <tbody>
+            <tr><td class="mono">GET/PUT /api/v1/companies/{id}</td><td>Retrieve or update the operating company's master data (name, registration, VAT, address, banking, invoice numbering, InvoicingEnabled); requires <span class="mono">company.master.manage</span></td></tr>
+            <tr><td class="mono">GET/POST /api/v1/clients</td><td>List/create client (customer) master records</td></tr>
+            <tr><td class="mono">GET/PUT /api/v1/clients/{id}</td><td>Retrieve or update a client, incl. its fixed billing currency (currency change requires <span class="mono">client.currency.change</span>) and credit limit</td></tr>
+            <tr><td class="mono">GET /api/v1/clients/{id}/credit-status</td><td>Current AR outstanding, WIP, total exposure, and available credit for a client (§5.4)</td></tr>
+            <tr><td class="mono">GET/POST /api/v1/subcontractors</td><td>List/create subcontractor (carrier) master records</td></tr>
+            <tr><td class="mono">GET/PUT /api/v1/subcontractors/{id}</td><td>Retrieve or update a subcontractor, incl. its fixed payment currency, compliance documents, and banking details</td></tr>
+            <tr><td class="mono">GET /api/v1/load-types</td><td>Reference list of load types (FTL, LTL, bulk, container, reefer…)</td></tr>
+            <tr><td class="mono">GET/POST /api/v1/locations</td><td>List/create named locations (name, province, country) for use as leg origins/destinations</td></tr>
+            <tr><td class="mono">POST /api/v1/loads</td><td>Create a load (inbound from customer portal/EDI); rejected with a credit-limit error if it would breach the client's available credit (§5.4)</td></tr>
+            <tr><td class="mono">POST /api/v1/loads/{id}/legs</td><td>Add/allocate a leg to own fleet or subcontractor, against an origin/destination location</td></tr>
+            <tr><td class="mono">GET /api/v1/loads/{id}/tracking</td><td>Current status and status history for a load</td></tr>
+            <tr><td class="mono">POST /api/v1/legs/{id}/debrief</td><td>Submit debrief data (also used by driver mobile web)</td></tr>
+            <tr><td class="mono">GET /api/v1/legs/{id}/confirmation</td><td>Retrieve the subcontractor load confirmation PDF for a leg</td></tr>
+            <tr><td class="mono">POST /api/v1/legs/{id}/confirmation/acknowledge</td><td>Subcontractor acknowledges (or declines) an issued load confirmation</td></tr>
+            <tr><td class="mono">POST /api/v1/legs/{id}/pod</td><td>Attach a POD document/photo to a leg — usable by internal staff, or by the assigned SubcontractorContact via the Supplier Portal (§13.3)</td></tr>
+            <tr><td class="mono">GET /api/v1/rates/quote</td><td>Return a sell-rate quote for a lane/commodity/UoM/quantity</td></tr>
+            <tr><td class="mono">GET/POST /api/v1/commodities</td><td>List/create commodity master records (§5.5)</td></tr>
+            <tr><td class="mono">POST /api/v1/loads/{id}/legs/{legId}/commodity-lines</td><td>Add a commodity line (product, quantity) to a leg — one or more per leg</td></tr>
+            <tr><td class="mono">GET/POST /api/v1/ancillary-service-types</td><td>List/create ancillary service reference data (e.g. Armed Escort — §5.6)</td></tr>
+            <tr><td class="mono">POST /api/v1/loads/{id}/legs/{legId}/ancillary-services</td><td>Add an ancillary service line to a leg, optionally naming the subcontractor providing it</td></tr>
+            <tr><td class="mono">GET/POST /api/v1/expense-types</td><td>List/create trip expense categories (Toll, Overnight, TruckStop, …, §9.1)</td></tr>
+            <tr><td class="mono">GET /api/v1/vehicles</td><td>Fleet list with compliance status</td></tr>
+            <tr><td class="mono">GET/POST /api/v1/equipment</td><td>List/register special equipment items</td></tr>
+            <tr><td class="mono">GET /api/v1/vehicles/{id}/equipment</td><td>Equipment currently issued to a vehicle</td></tr>
+            <tr><td class="mono">POST /api/v1/equipment/{id}/issue</td><td>Issue an item to a vehicle, recording condition on issue</td></tr>
+            <tr><td class="mono">POST /api/v1/equipment/{id}/return</td><td>Return an item from a vehicle, recording condition (or lost/damaged) on return</td></tr>
+            <tr><td class="mono">GET /api/v1/cost-centres</td><td>Cost centre hierarchy for a company</td></tr>
+            <tr><td class="mono">GET /api/v1/financial-periods?companyId=&amp;status=Open</td><td>The financial calendar for a company, including which period is currently open (§10.3)</td></tr>
+            <tr><td class="mono">GET /api/v1/financial-periods/{id}/close-checklist</td><td>Draft invoices, unmatched accruals, and open exceptions still outstanding for the period (§10.3)</td></tr>
+            <tr><td class="mono">POST /api/v1/financial-periods/{id}/close</td><td>Close a financial period — triggers the debtors roll-over and opens the next period; if the checklist above is non-empty, requires an explicit acknowledgement; requires <span class="mono">finance.period.close</span></td></tr>
+            <tr><td class="mono">GET /api/v1/clients/{id}/aging?period=</td><td>A client's aged-debtors snapshot for a given (or the current) financial period</td></tr>
+            <tr><td class="mono">GET /api/v1/exchange-rates?from=&amp;to=&amp;date=</td><td>Retrieve the rate for a currency pair effective on a given date</td></tr>
+            <tr><td class="mono">POST /api/v1/exchange-rates</td><td>Capture/override a daily rate for a currency pair (from the automated feed or manually by finance); requires <span class="mono">finance.exchangerate.manage</span></td></tr>
+            <tr><td class="mono">GET /api/v1/clients/{id}/invoices</td><td>Invoices raised against a client, with line and credit-note detail</td></tr>
+            <tr><td class="mono">POST /api/v1/invoices/{id}/credit-notes</td><td>Raise a credit note against an issued invoice</td></tr>
+            <tr><td class="mono">GET /api/v1/subcontractors/{id}/accruals</td><td>Open and netted accruals for a subcontractor, by status</td></tr>
+            <tr><td class="mono">POST /api/v1/subcontractor-invoices</td><td>Capture a subcontractor's supplier invoice</td></tr>
+            <tr><td class="mono">POST /api/v1/subcontractor-invoices/{id}/match</td><td>Match a supplier invoice to leg(s)/accrual(s), netting the accrual and finalizing the expense</td></tr>
+            <tr><td class="mono">GET /api/v1/subcontractor-expenses?status=AvailableToExport</td><td>Finalized expenses ready for the AP/GL export run</td></tr>
+            <tr><td class="mono">GET /api/v1/exceptions?status=Open</td><td>Open exceptions, automatically scoped to the caller — staff, client, or subcontractor (§16.1)</td></tr>
+            <tr><td class="mono">POST /api/v1/exceptions/{id}/acknowledge</td><td>Acknowledge an exception</td></tr>
+            <tr><td class="mono">POST /api/v1/exceptions/{id}/resolve</td><td>Resolve an exception with notes</td></tr>
+            <tr><td class="mono">POST /api/v1/webhooks/subscriptions</td><td>Register a partner's callback URL for an event type</td></tr>
+            <tr><td class="mono">GET/POST /api/v1/accounting-connections</td><td>List a company's accounting connections / start a new OAuth2 connection to Xero (or another supported provider)</td></tr>
+            <tr><td class="mono">POST /api/v1/accounting-connections/{id}/disconnect</td><td>Revoke a connection's tokens; past sync records are kept, nothing new is pushed</td></tr>
+            <tr><td class="mono">GET/PUT /api/v1/accounting-connections/{id}/mappings</td><td>View/set the CostCentre/LoadType/Client/Subcontractor → external account mapping</td></tr>
+            <tr><td class="mono">GET /api/v1/accounting-connections/{id}/sync-records?status=Failed</td><td>Failed pushes awaiting finance review/retry</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <h3><span class="secnum">11.3</span>Outbound events</h3>
+      <p style="font-size:13.5px;max-width:70ch;">Key state changes (<span class="mono">load.status_changed</span>, <span class="mono">loadconfirmation.issued</span>, <span class="mono">debrief.approved</span>, <span class="mono">invoice.issued</span>, <span class="mono">creditnote.issued</span>, <span class="mono">subcontractor_accrual.raised</span>, <span class="mono">subcontractor_invoice.received</span>, <span class="mono">subcontractor_expense.available_for_export</span>, <span class="mono">financialperiod.closed</span>, <span class="mono">exception.raised</span>) publish to an internal event bus and fan out to subscribed partner webhooks with retry/backoff, decoupling downstream systems from API polling.</p>
+
+      <h3><span class="secnum">11.4</span>Accounting platform integration (Xero, and beyond)</h3>
+      <p style="font-size:13.5px;max-width:70ch;">Rather than route through third-party middleware, the Integration module (§06) owns this itself as a first-party <span class="mono">AccountingExportAdapter</span> — one interface (push invoice, push credit note, push bill/payable, sync contact) with a Xero implementation as the first target. No middleware subscription and no extra vendor sitting in the data path; QuickBooks or Sage become additional adapters behind the same interface later.</p>
+      <div class="diagram">
+<pre class="mermaid">
+flowchart LR
+    EVT["invoice.issued /<br/>creditnote.issued /<br/>subcontractor_expense.<br/>available_for_export"] --> ADAPT["Accounting Export Adapter<br/>(one interface, pluggable per provider)"]
+    ADAPT --> MAP["Resolve GL / tracking<br/>mapping (AccountingMapping)"]
+    MAP --> PUSH["Push via provider's own API<br/>(Xero OAuth2 — first-party)"]
+    PUSH -->|"success"| SYNCED["AccountingSyncRecord:<br/>Synced + external id stored"]
+    PUSH -->|"failure"| FAILED["AccountingSyncRecord:<br/>Failed + error detail"]
+    FAILED --> RETRY["Finance retries<br/>from a sync queue"]
+    RETRY --> PUSH
+</pre>
+        <div class="cap">Fig. 8 — The adapter reacts to events the platform already publishes (§11.3); nothing about billing or subcontractor payables (§10) needs to know an accounting export even exists.</div>
+      </div>
+      <ul style="font-size:13.5px;">
+        <li><strong>Connection:</strong> each <span class="mono">Company</span> authorises its own Xero organisation through Xero's own OAuth2 flow — Xero is itself org-scoped, which lines up naturally with the Company scoping already in place (§04). Tokens are stored per <span class="mono">AccountingConnection</span> and refreshed automatically.</li>
+        <li><strong>Mapping:</strong> an <span class="mono">AccountingMapping</span> lets finance map each CostCentre, LoadType, Client, or Subcontractor to the correct Xero chart-of-account code or tracking category, once per connection — so pushed documents land in the right place in the client's own ledger without hardcoding assumptions about their chart of accounts.</li>
+        <li><strong>Trigger:</strong> the adapter listens to the same outbound events already defined above (§11.3) — <span class="mono">invoice.issued</span>/<span class="mono">creditnote.issued</span> push a Xero Invoice/Credit Note against the mapped Client contact; <span class="mono">subcontractor_expense.available_for_export</span> pushes a Xero Bill against the mapped Subcontractor contact.</li>
+        <li><strong>Idempotency &amp; reconciliation:</strong> every push is recorded on an <span class="mono">AccountingSyncRecord</span> storing the resulting external id, so a retry never creates a duplicate on the Xero side; a failed push is queued for a finance user to inspect and retry rather than silently dropped.</li>
+      </ul>
+      <div class="tablewrap">
+        <table>
+          <thead><tr><th>Entity</th><th>Notable fields</th></tr></thead>
+          <tbody>
+            <tr><td>AccountingConnection</td><td><span class="tag pk">Id</span> CompanyId, Provider (Xero | QuickBooks | Sage), ExternalTenantId, OAuthTokenSet (encrypted), Status (Connected | Expired | Disconnected)</td></tr>
+            <tr><td>AccountingMapping</td><td><span class="tag pk">Id</span> <span class="tag fk">ConnectionId</span>, SourceType (CostCentre | LoadType | Client | Subcontractor), SourceId, ExternalAccountCode, ExternalTrackingCategoryId?</td></tr>
+            <tr><td>AccountingSyncRecord</td><td><span class="tag pk">Id</span> <span class="tag fk">ConnectionId</span>, SourceType (Invoice | CreditNote | SubcontractorExpense | Contact), SourceId, ExternalId?, Status (Pending | Synced | Failed), LastAttemptAt, ErrorDetail?</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h3><span class="secnum">11.5</span>Master-data CRUD convention</h3>
+      <p style="font-size:13.5px;max-width:70ch;">§11.2 is representative, not an exhaustive inventory — enumerating every entity introduced across §05–§16 against every verb would be noise, not documentation. Instead, every master-data or reference resource follows one standard shape; a resource not explicitly listed in §11.2 still has a predictable, defined API surface because it follows this convention rather than needing a bespoke one invented for it.</p>
+      <div class="tablewrap">
+        <table>
+          <thead><tr><th>Operation</th><th>Pattern</th><th>Notes</th></tr></thead>
+          <tbody>
+            <tr><td>List</td><td class="mono">GET /api/v1/{resource}</td><td>Filtered and paginated; scoped to the caller's Tenant/Company automatically (§4.1), never as a query parameter the caller supplies</td></tr>
+            <tr><td>Retrieve</td><td class="mono">GET /api/v1/{resource}/{id}</td><td></td></tr>
+            <tr><td>Create</td><td class="mono">POST /api/v1/{resource}</td><td></td></tr>
+            <tr><td>Update</td><td class="mono">PUT /api/v1/{resource}/{id}</td><td>Full replace; a field with its own approval rule (e.g. <span class="mono">Client.CurrencyId</span>, §04) stays behind its own function regardless</td></tr>
+            <tr><td>Deactivate — never delete</td><td class="mono">POST /api/v1/{resource}/{id}/deactivate</td><td>Flips a Status/Active field rather than removing the row. Master data this design relies on for financial or audit history (§10, §12) is retired, never hard-deleted</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p style="font-size:13.5px;max-width:70ch;">This is what Driver, Vehicle, CostCentre, LoadType, UnitOfMeasure, Location (§5.1), Commodity, AncillaryServiceType (§5.5, §5.6), Equipment (§5.3), and ExpenseType (§9.1) all use, without each needing its own row in §11.2. It's a deliberate contrast with entities that have a real lifecycle of their own rather than a CRUD one — a Load, Invoice, or SubcontractorAccrual is never edited or deactivated; it moves through the status machine defined in its own section instead (§5.2, §10).</p>
+      <p style="font-size:13.5px;max-width:70ch;">A few resource groups genuinely had no documented surface at all until now, so they're listed explicitly rather than left to the convention alone:</p>
+      <div class="tablewrap">
+        <table>
+          <thead><tr><th>Method &amp; path</th><th>Purpose</th></tr></thead>
+          <tbody>
+            <tr><td class="mono">GET/POST /api/v1/users</td><td>List/create internal users; requires an identity-admin function (§07)</td></tr>
+            <tr><td class="mono">GET/PUT /api/v1/users/{id}</td><td>Retrieve or update a user, incl. their company/role assignments</td></tr>
+            <tr><td class="mono">POST /api/v1/users/{id}/deactivate</td><td>Disable a user without deleting their history — every action they took stays attributed (§12)</td></tr>
+            <tr><td class="mono">GET/POST /api/v1/roles</td><td>List/create roles; <span class="mono">GET /api/v1/functions</span> is read-only — functions are registered by the API itself as endpoints ship (§07), never user-created</td></tr>
+            <tr><td class="mono">PUT /api/v1/roles/{id}/functions</td><td>Set a role's granted functions</td></tr>
+            <tr><td class="mono">GET/POST /api/v1/vehicles</td><td>List/create/register vehicle master records (§5.1)</td></tr>
+            <tr><td class="mono">GET/POST /api/v1/drivers</td><td>List/create driver master records (§5.1)</td></tr>
+            <tr><td class="mono">GET/POST /api/v1/cost-centres</td><td>Create/maintain the cost centre hierarchy for a company — extends the read-only listing already shown above</td></tr>
+            <tr><td class="mono">GET/POST /api/v1/clients/{id}/contacts</td><td>Invite/list a Client's portal contacts (§13.1); <span class="mono">POST .../{contactId}/deactivate</span> revokes portal access without deleting their audit history</td></tr>
+            <tr><td class="mono">GET/POST /api/v1/subcontractors/{id}/contacts</td><td>The same, for Supplier Portal contacts</td></tr>
+            <tr><td class="mono">GET/POST /api/v1/financial-years</td><td>Define a company's financial year and generate its periods (§10.3)</td></tr>
+            <tr><td class="mono">GET/PUT /api/v1/companies/{id}/retention-policies</td><td>View/set the retention period and legal basis per data category (§14.2)</td></tr>
+            <tr><td class="mono">POST /api/v1/data-subject-requests</td><td>Log an access, rectification, erasure, or portability request; <span class="mono">GET /api/v1/data-subject-requests?status=</span> tracks it to its due date (§14.3)</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h3><span class="secnum">11.6</span>Document generation &amp; export</h3>
+      <p style="font-size:13.5px;max-width:70ch;">Two different needs, not one: legal/billing documents that must never change after they're issued, and data exports that are recomputed live from whatever the data looks like right now. Conflating the two — say, "regenerating" an invoice PDF from current data — would silently rewrite a document a client has already received.</p>
+      <div class="tablewrap">
+        <table>
+          <thead><tr><th>Kind</th><th>Format</th><th>Examples</th><th>Rule</th></tr></thead>
+          <tbody>
+            <tr><td>Legal / billing document</td><td>PDF, rendered once and archived</td><td>Invoice, Credit Note, Load Confirmation (§8.2)</td><td>Never re-rendered from current data. A template or rounding-rule change afterwards leaves every already-issued PDF exactly as it was; a correction is a new Credit Note (§10.1), never a "regenerate the PDF" action</td></tr>
+            <tr><td>Data export</td><td>CSV / Excel / JSON</td><td>Aged-debtors report (§10.3), dashboard exports (§16), DSR portability response (§14.3)</td><td>Recomputed live on every request — never archived, since the whole point is a current view, not a fixed record</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <ul style="font-size:13.5px;">
+        <li><span class="mono">Invoice</span> and <span class="mono">CreditNote</span> each carry their own <span class="mono">PdfUrl</span>, set once when the document moves to <em>Issued</em> and never touched again — the same pattern <span class="mono">LoadConfirmation</span> already uses (§8.2).</li>
+        <li>Data exports never go through this path: the Xero push (§11.4) is an API call, not a file, even though the underlying concepts (invoice, credit note, bill) are the same on both sides.</li>
+        <li>A DSR portability response (§14.3) is a data export, not a legal document — it reflects the subject's data as it stands when the request is fulfilled, not a permanently archived snapshot.</li>
+      </ul>
+      <div class="tablewrap">
+        <table>
+          <thead><tr><th>Method &amp; path</th><th>Purpose</th></tr></thead>
+          <tbody>
+            <tr><td class="mono">GET /api/v1/invoices/{id}/pdf</td><td>The archived PDF for an issued invoice</td></tr>
+            <tr><td class="mono">GET /api/v1/credit-notes/{id}/pdf</td><td>The archived PDF for an issued credit note</td></tr>
+            <tr><td class="mono">GET /api/v1/clients/{id}/aging/export?format=csv</td><td>Live aged-debtors export for a client</td></tr>
+            <tr><td class="mono">GET /api/v1/data-subject-requests/{id}/export</td><td>The portability response for a fulfilled DSR (JSON)</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- 12 AUDIT -->
+    <section id="audit">
+      <h2><span class="secnum">12</span>Audit Trail</h2>
+      <p class="lede">Auditability is not one module's responsibility — it is a platform-level guarantee. Every state-changing action anywhere in the system, from any module covered in §05–§11, writes an immutable record of who did what and when, enforced at the data-access layer so no module can quietly skip it.</p>
+      <div class="diagram">
+<pre class="mermaid">
+flowchart LR
+    ACT["Any mutating<br/>API call"] --> MW["SaveChanges<br/>interceptor"]
+    MW --> ENTRY["AuditEntry written —<br/>who, when, old → new"]
+    MW --> TEMP["SQL Server temporal<br/>history (master data)"]
+    ENTRY --> STORE[("Append-only<br/>audit store")]
+    TEMP --> STORE
+    STORE -->|"requires audit.view"| VIEW["Audit trail<br/>viewer / export"]
+</pre>
+        <div class="cap">Fig. 9 — Capture happens once, centrally, below the module layer — a developer adding a new module doesn't have to remember to "add auditing" for it to be covered.</div>
+      </div>
+
+      <h3><span class="secnum">12.1</span>What is audited</h3>
+      <div class="tablewrap">
+        <table>
+          <thead><tr><th>Category</th><th>Examples captured</th></tr></thead>
+          <tbody>
+            <tr><td>Master data</td><td>Any change to Company, Client (incl. credit limit and currency, §5.4/§04), Subcontractor, Vehicle, Driver, CostCentre, rate cards, Equipment</td></tr>
+            <tr><td>Load lifecycle</td><td>Every status transition (<span class="mono">LoadStatusHistory</span>, §5.2) — who allocated, cancelled, put a load on hold, and why</td></tr>
+            <tr><td>Debrief</td><td>Submission, exception flags, approval/escalation decisions (§09)</td></tr>
+            <tr><td>Billing</td><td>Invoice and credit note issuance, void/cancel attempts (§10.1)</td></tr>
+            <tr><td>Subcontractor payables</td><td>Accrual raised/adjusted, supplier invoice received, match/netting decision, variance flags (§10.2)</td></tr>
+            <tr><td>Credit control</td><td>Every hard-stop rejection and every <span class="mono">client.creditlimit.override</span> use, with its mandatory reason (§5.4)</td></tr>
+            <tr><td>Identity &amp; access</td><td>Login, role/function assignment changes, API client/key issuance and revocation (§07, §11)</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h3><span class="secnum">12.2</span>Capture &amp; immutability</h3>
+      <ul style="font-size:13.5px;">
+        <li>A uniform <span class="mono">AuditEntry</span> (Id, EntityType, EntityId, Action, ChangedByUserId?/ApiClientId?, ChangedAtUtc, OldValueJson, NewValueJson, Reason?, CompanyId) is written by an EF Core <span class="mono">SaveChanges</span> interceptor — the same code path every module already goes through — so coverage doesn't depend on each module remembering to log itself.</li>
+        <li>Master-data tables additionally use SQL Server <strong>temporal tables</strong>, so "what did this record look like on a given date" is answerable directly from the database, not by replaying the audit log.</li>
+        <li>The audit store is append-only at the database level (no UPDATE/DELETE grant, even for administrators) — the audit trail itself can't be edited to hide what it recorded.</li>
+        <li>Records already covered by the immutability rules elsewhere in this design (an approved debrief, an issued invoice, a finalized subcontractor expense — §09, §10) are never edited in place; a correction is always a new compensating record. The audit trail is what makes that rule enforceable rather than aspirational.</li>
+      </ul>
+
+      <h3><span class="secnum">12.3</span>Access &amp; retention</h3>
+      <p style="font-size:13.5px;max-width:70ch;">Viewing audit history is gated by its own <span class="mono">audit.view</span> function, separate from the function that makes the change — so day-to-day operators can act without also being able to review or quietly obscure their own history. Retention follows each country's statutory record-keeping period (configured per Company) and the full trail is exportable on demand for an external audit or regulatory inquiry. Where that retained history contains personal data, §14 governs how long it stays identifiable and what happens to it under an erasure request.</p>
+    </section>
+
+    <!-- 13 PORTALS -->
+    <section id="portals">
+      <h2><span class="secnum">13</span>Customer &amp; Supplier Portals</h2>
+      <p class="lede">Both portals are thin Vue 3 SPAs that consume the exact same REST API internal staff use (§11) — there is no parallel backend and no duplicated business logic. What's different is the identity behind the login: a portal session is scoped to exactly one <span class="mono">Client</span> or one <span class="mono">Subcontractor</span>, never to a Company's internal role set.</p>
+
+      <h3><span class="secnum">13.1</span>Portal identity &amp; scoping</h3>
+      <div class="diagram">
+<pre class="mermaid">
+flowchart LR
+    CC["ClientContact<br/>login"] --> TOK1["JWT carries a fixed<br/>ClientId claim"]
+    SC["SubcontractorContact<br/>login"] --> TOK2["JWT carries a fixed<br/>SubcontractorId claim"]
+    TOK1 --> API["Same REST API<br/>internal staff use (§11)"]
+    TOK2 --> API
+    API --> FILTER["Row-level scoping filter<br/>(same mechanism as §04)"]
+    FILTER --> CDATA["Client's own loads,<br/>invoices &amp; credit notes"]
+    FILTER --> SDATA["Subcontractor's own<br/>allocated legs, confirmations &amp; PODs"]
+</pre>
+        <div class="cap">Fig. 10 — Portal scoping reuses the exact same row-level filtering mechanism as company/country scoping (§04) — a portal call can only ever return that one party's rows, enforced at the data layer rather than by the UI choosing not to ask for more.</div>
+      </div>
+      <ul style="font-size:13.5px;">
+        <li>A <span class="mono">ClientContact</span> belongs to exactly one <span class="mono">Client</span>; a <span class="mono">SubcontractorContact</span> belongs to exactly one <span class="mono">Subcontractor</span>. Both reuse the internal Role/Function model (§07), but only a small, fixed set of portal functions is ever granted to them.</li>
+        <li>Representative functions: <span class="mono">portal.client.viewloads</span>, <span class="mono">portal.client.viewinvoices</span>, <span class="mono">portal.subcontractor.viewlegs</span>, <span class="mono">portal.subcontractor.acknowledgeconfirmation</span>, <span class="mono">portal.subcontractor.uploadpod</span>.</li>
+        <li>Every portal action is captured by the same audit trail as any other write (§12) — a POD upload or a confirmation acknowledgement from a subcontractor contact leaves exactly as clear a record as if a staff member had done it.</li>
+      </ul>
+      <div class="tablewrap">
+        <table>
+          <thead><tr><th>Entity</th><th>Notable fields</th></tr></thead>
+          <tbody>
+            <tr><td>ClientContact</td><td><span class="tag pk">Id</span> <span class="tag fk">ClientId</span>, Name, Email, Status (Invited | Active | Disabled)</td></tr>
+            <tr><td>SubcontractorContact</td><td><span class="tag pk">Id</span> <span class="tag fk">SubcontractorId</span>, Name, Email, Status (Invited | Active | Disabled)</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h3><span class="secnum">13.2</span>Customer portal</h3>
+      <ul style="font-size:13.5px;">
+        <li>Load list and tracking for their own loads, following the same status lifecycle (§5.2) shown to internal staff.</li>
+        <li>Invoices and credit notes, with PDF download (§10.1) — nothing to show if the owning company runs in load-tracking-only mode (§10), since none are ever issued.</li>
+        <li>A credit status widget — available credit, WIP, and AR outstanding (§5.4) — so a client can see for themselves why a new load might be blocked, rather than raising a support ticket. A fuller landing dashboard, with an aged view of their own balance and any open exceptions on their loads/invoices, is detailed in §16.3.</li>
+        <li>Optional self-service load booking, still subject to the same credit hard stop as every other channel (§5.4) — the portal gets no special exemption.</li>
+      </ul>
+
+      <h3><span class="secnum">13.3</span>Supplier (subcontractor) portal</h3>
+      <ul style="font-size:13.5px;">
+        <li>Legs allocated to the subcontractor, each with its Load Confirmation (§8.2) and the agreed buy rate — accept or decline directly from the portal.</li>
+        <li>POD attachment: once a leg is delivered, the subcontractor uploads a POD document or photo against it. This does not bypass debriefing (§09) — it populates the POD evidence on that leg's own Debrief record, so the same exception rules (missing POD, etc.) apply exactly as if a company driver had submitted it.</li>
+        <li>Accrual/supplier-invoice matching status (§10.2) — "when will I get paid" — surfaced without exposing internal margin data; the full dashboard view of this is detailed in §16.4.</li>
+      </ul>
+    </section>
+
+    <!-- 14 PRIVACY -->
+    <section id="privacy">
+      <h2><span class="secnum">14</span>Data Retention &amp; Privacy Compliance</h2>
+      <p class="lede">Every Tenant is the <strong>Data Controller</strong> for the personal data it puts into the system — its own drivers, its clients' and subcontractors' contacts, its own staff. The platform operator is the <strong>Data Processor</strong>, bound by a Data Processing Agreement per tenant. GDPR (for EU-linked clients) and POPIA (for South African operations) are treated as one shared set of obligations — the two regimes define near-identical data subject rights — implemented as configurable policy and enforced workflow, not a one-off audit checkbox.</p>
+
+      <h3><span class="secnum">14.1</span>Controller/processor relationship &amp; data residency</h3>
+      <ul style="font-size:13.5px;">
+        <li>Hosting region is selectable per Tenant (e.g. an EU customer's data stays in an EU Azure region; a South African customer's in a local one), satisfying GDPR's cross-border transfer restrictions and POPIA's equivalent. The Tenant isolation already built for §4.1 is what makes region-pinning a deployment choice rather than a redesign.</li>
+        <li>Any cross-tenant access by the break-glass Platform Support role (§4.1) is itself a processing activity under the DPA, and is captured like everything else by the audit trail (§12).</li>
+      </ul>
+
+      <h3><span class="secnum">14.2</span>What personal data is held, and for how long</h3>
+      <div class="tablewrap">
+        <table>
+          <thead><tr><th>Data category</th><th>Examples</th><th>Retention driver</th><th>At expiry</th></tr></thead>
+          <tbody>
+            <tr><td>Financial/tax records</td><td>Invoice, CreditNote, SubcontractorExpense</td><td>Statutory tax/record-keeping law of the Company's Country</td><td>Kept in full for the statutory period — both GDPR and POPIA permit retention where a legal obligation requires it</td></tr>
+            <tr><td>Driver personal data</td><td>Licence, ID number, contact details, medicals</td><td>Employment/labour law + operational need</td><td>Kept through employment plus the statutory post-employment period, then personal fields anonymized</td></tr>
+            <tr><td>Portal contact data</td><td>ClientContact, SubcontractorContact</td><td>Active commercial relationship</td><td>Anonymized a defined period after the relationship ends, or on a valid erasure request — the underlying Client/Subcontractor's financial history is unaffected</td></tr>
+            <tr><td>Audit trail entries</td><td>AuditEntry (§12)</td><td>Same statutory period as the record it documents</td><td>The fact that a change happened is kept; personal fields inside its old/new value snapshot are redacted once their own retention period lapses</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="tablewrap" style="margin-top:14px;">
+        <table>
+          <thead><tr><th>Entity</th><th>Notable fields</th></tr></thead>
+          <tbody>
+            <tr><td>RetentionPolicy</td><td><span class="tag pk">Id</span> <span class="tag fk">CompanyId</span>, DataCategory, RetentionPeriodYears, LegalBasis, AnonymizeAfterExpiry (bool)</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h3><span class="secnum">14.3</span>Data subject rights &amp; the erasure/retention tension</h3>
+      <p style="font-size:13.5px;max-width:70ch;">A Driver, ClientContact, SubcontractorContact, or internal User can exercise access, rectification, erasure, or portability rights — GDPR and POPIA define an almost identical set. Every request is logged as its own record so a response deadline (GDPR: one month; POPIA: "as soon as reasonably possible") is never missed silently.</p>
+      <div class="diagram">
+<pre class="mermaid">
+flowchart LR
+    REQ["Data subject<br/>request received"] --> LOG["Logged as DataSubjectRequest<br/>— due date set"]
+    LOG --> TYPE{"Request type"}
+    TYPE -->|"Access / Portability"| EXPORT["Compile &amp; return<br/>the subject's data"]
+    TYPE -->|"Rectification"| FIX["Correct the<br/>source record"]
+    TYPE -->|"Erasure"| HOLD{"Legal retention<br/>obligation active? (§14.2)"}
+    HOLD -->|"No"| ANON["Anonymize personal fields —<br/>incl. historic audit snapshots"]
+    HOLD -->|"Yes, e.g. tax law"| PARTIAL["Anonymize what isn't<br/>legally required; retain<br/>the rest, with reason cited"]
+    EXPORT --> DONE["Request marked Fulfilled"]
+    FIX --> DONE
+    ANON --> DONE
+    PARTIAL --> DONE
+</pre>
+        <div class="cap">Fig. 11 — Erasure is never literal deletion of a record covered by a legal retention obligation; it can't be, without breaking the tax and audit guarantees the rest of this design relies on (§10, §12). It anonymizes the personal fields and leaves the transactional skeleton — amounts, dates, statuses, cost centres — intact.</div>
+      </div>
+      <div class="tablewrap">
+        <table>
+          <thead><tr><th>Entity</th><th>Notable fields</th></tr></thead>
+          <tbody>
+            <tr><td>DataSubjectRequest</td><td><span class="tag pk">Id</span> TenantId, SubjectType (Driver | ClientContact | SubcontractorContact | User), SubjectId, RequestType (Access | Rectification | Erasure | Portability), Status (Received | InProgress | Fulfilled | Rejected), ReceivedAt, DueDate, FulfilledAt?, RejectionReason?, HandledByUserId</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h3><span class="secnum">14.4</span>Breach handling</h3>
+      <p style="font-size:13.5px;max-width:70ch;">A confirmed personal-data breach is notified to the relevant regulator — the EU/UK supervisory authority under GDPR within 72 hours, or South Africa's Information Regulator under POPIA "as soon as reasonably possible" — and to affected data subjects where required. The audit trail (§12) is what makes scoping a breach (which tenant, which records, which time window) a query rather than a forensic exercise.</p>
+    </section>
+
+    <!-- 15 DR -->
+    <section id="dr">
+      <h2><span class="secnum">15</span>Backup &amp; Disaster Recovery</h2>
+      <p class="lede">Backups protect against data loss; disaster recovery protects against losing an entire region. Both have to respect the same tenant boundaries and data-residency rules already built for multi-tenancy (§4) and privacy (§14) — a restore or failover is never an excuse to move a tenant's data somewhere it isn't allowed to be, or to expose one tenant's data while recovering another's.</p>
+
+      <h3><span class="secnum">15.1</span>Backup strategy &amp; recovery point</h3>
+      <ul style="font-size:13.5px;">
+        <li>Automated full, differential, and transaction-log backups (native to Azure SQL, or SQL Server backup on-prem) give point-in-time restore within the retention window — target <strong>RPO ≤ 15 minutes</strong> for transactional data (Load, Invoice, Debrief, and everything else in §05).</li>
+        <li>The audit trail (§12) is backed up on the exact same schedule as the data it documents — never treated as disposable log output, since its entire purpose is to survive whatever happened to the primary data.</li>
+        <li>Backups are encrypted at rest with the same key management as live data (§17). The backup retention window is itself short relative to the statutory retention periods in §14.2 — a backup is a short-term operational safety net, not a second system of record, so it ages out well before it could become a forgotten copy of data that was erased under §14.3.</li>
+      </ul>
+
+      <h3><span class="secnum">15.2</span>Restore granularity in a pooled multi-tenant database</h3>
+      <div class="diagram">
+<pre class="mermaid">
+flowchart LR
+    INC["Restore requested —<br/>single tenant or full outage"] --> SCOPE{"Pooled or Silo<br/>tenant? (§4.2)"}
+    SCOPE -->|"Silo"| SILO["Native point-in-time restore<br/>of that tenant's own database"]
+    SCOPE -->|"Pooled"| SCRATCH["Restore the point-in-time<br/>backup to an isolated<br/>scratch database"]
+    SCRATCH --> EXTRACT["Extract only rows matching<br/>the affected TenantId"]
+    EXTRACT --> RECON["Reconcile extracted rows<br/>back into production"]
+    SILO --> DONE["Restore complete —<br/>logged to audit trail (§12)"]
+    RECON --> DONE
+</pre>
+        <div class="cap">Fig. 12 — For a pooled tenant, "restore this one customer's data" is never a direct operation on the shared tables; it's a restore-then-extract against a scratch copy, so no other tenant's rows in that same backup are ever touched or exposed.</div>
+      </div>
+      <ul style="font-size:13.5px;">
+        <li>For pooled tenants (§4.2), restoring one tenant's data means restoring the affected backup into an isolated scratch database and extracting only rows matching that <span class="mono">TenantId</span> — the same column Row-Level Security already enforces (§4.1) — before reconciling them into production.</li>
+        <li>For silo tenants (their own dedicated database, §4.2), restore is a native point-in-time restore of just that one database — simpler, and part of why a large or regulated customer might specifically choose the silo model.</li>
+        <li>Every restore, partial or full, is itself an audited event (§12): who authorised it, what was restored, and for which tenant.</li>
+      </ul>
+
+      <h3><span class="secnum">15.3</span>High availability vs. regional disaster recovery</h3>
+      <ul style="font-size:13.5px;">
+        <li><strong>High availability</strong> — zone-redundant failover within a region — handles infrastructure failure with near-zero downtime and is always on.</li>
+        <li><strong>Disaster recovery</strong> — a geo-replicated secondary region — handles a full regional outage. A tenant's secondary region is chosen from the same residency-approved set as its primary (§14.1): an EU tenant's DR copy stays in the EU, a South African tenant's in an approved regional pair, so failing over never creates a fresh cross-border transfer problem in the middle of an incident.</li>
+        <li>Target <strong>RTO ≤ 4 hours</strong> for a full regional failover of the platform; a single-tenant restore (§15.2) is typically far faster since it doesn't require a region-wide failover at all.</li>
+      </ul>
+
+      <h3><span class="secnum">15.4</span>Testing &amp; assurance</h3>
+      <p style="font-size:13.5px;max-width:70ch;">An untested backup is not a backup. Restore drills run on a fixed schedule (quarterly, at minimum) against a scratch environment, exercising the exact pooled-tenant extraction procedure in §15.2 — not just confirming a backup file exists. Findings from each drill feed back into the runbook and are tracked like any other operational risk.</p>
+    </section>
+
+    <!-- 16 DASHBOARDS -->
+    <section id="dashboards">
+      <h2><span class="secnum">16</span>Dashboards, Reporting &amp; Exception Management</h2>
+      <p class="lede">Three dashboards sit on top of the same data and the same tenant/company scoping already established (§04, §13): an internal one for staff, and a scoped-down one inside each portal (§13) for clients and subcontractors. None of them is a parallel reporting database — they're read surfaces over the entities already defined — and all three share one mechanism for surfacing anything that needs a human's attention.</p>
+
+      <h3><span class="secnum">16.1</span>Exception management — the shared mechanism</h3>
+      <p style="font-size:13.5px;max-width:70ch;">Rather than each module inventing its own alerting, every place in this design that already flags something for attention writes a single, common <span class="mono">Exception</span> record. A dashboard is then a filtered, scoped query against one table, never bespoke per-module logic.</p>
+      <div class="diagram">
+<pre class="mermaid">
+flowchart LR
+    DEB["Debrief exceptions (§09)"] --> EXC
+    CC["Credit hard-stop / override (§5.4)"] --> EXC
+    ACC["Accrual / invoice variance (§10.2)"] --> EXC
+    SYNC["Accounting sync failure (§11.4)"] --> EXC
+    COMP["Vehicle/driver<br/>compliance expiry"] --> EXC
+    DSR["DSR deadline<br/>approaching (§14.3)"] --> EXC
+    EXC["Exception —<br/>one shared entity"] --> INT["Internal dashboard —<br/>company-scoped (§16.2)"]
+    EXC --> CPORT["Customer Portal dashboard —<br/>Client-scoped (§16.3)"]
+    EXC --> SPORT["Supplier Portal dashboard —<br/>Subcontractor-scoped (§16.4)"]
+</pre>
+        <div class="cap">Fig. 13 — Every module writes the same shape of record; every dashboard reads the same table through its own scope filter — a new exception source plugs into dashboards that already exist, rather than needing its own.</div>
+      </div>
+      <ul style="font-size:13.5px;">
+        <li>Lifecycle: <span class="pill accent">Open</span> → <span class="pill warn">Acknowledged</span> → <span class="pill good">Resolved</span>, with a severity (Info | Warning | Critical) and an optional assignee — itself an audited lifecycle (§12), same as everything else.</li>
+        <li>Scope is automatic, not a dashboard-level filter someone could get wrong: internal staff see exceptions across their assigned Company/Companies (§07); a <span class="mono">ClientContact</span> sees only exceptions tied to their own Client's loads or invoices; a <span class="mono">SubcontractorContact</span> sees only exceptions tied to their own legs or accruals — enforced by the same row-level scoping as everything else (§4.1, §13.1).</li>
+      </ul>
+      <div class="tablewrap">
+        <table>
+          <thead><tr><th>Entity</th><th>Notable fields</th></tr></thead>
+          <tbody>
+            <tr><td>Exception</td><td><span class="tag pk">Id</span> TenantId, CompanyId, Category, Severity (Info | Warning | Critical), EntityType, EntityId, Status (Open | Acknowledged | Resolved), RaisedAt, AssignedToUserId?, Description, ResolvedAt?, ResolutionNotes?</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h3><span class="secnum">16.2</span>Internal dashboard</h3>
+      <ul style="font-size:13.5px;">
+        <li>KPI tiles: load volumes by status (§5.2), sell/buy margin (§08), aged debtors summary rolled up from <span class="mono">DebtorsAgingSnapshot</span> (§10.3), credit exposure across clients (Total Exposure vs. CreditLimit, §5.4), subcontractor payable summary (Accrued / Available to Export / Paid, §10.2), on-time delivery rate, and open exception count by category and severity.</li>
+        <li>Every tile drills through to its underlying filtered list — clicking "Aged 90+ Days: R240,000" opens the client list at that bucket — nothing is a dead-end number.</li>
+        <li>Default layout follows the viewer's role (§07): a Dispatcher's dashboard leads with load/exception tiles; a Finance Clerk's leads with aged-debtors/accrual tiles. Same underlying data, different emphasis.</li>
+      </ul>
+
+      <h3><span class="secnum">16.3</span>Customer portal dashboard</h3>
+      <p style="font-size:13.5px;max-width:70ch;">A landing view added to the Customer Portal (§13.2): open load count by status, the credit status widget already planned there, an aged view of their own outstanding balance (their own <span class="mono">DebtorsAgingSnapshot</span> rows, §10.3), and any open Exceptions tied to their own loads or invoices — a load On Hold, an overdue invoice — so a client sees the same kind of "what needs my attention" view internal staff get, scoped to just their own data.</p>
+
+      <h3><span class="secnum">16.4</span>Supplier portal dashboard</h3>
+      <p style="font-size:13.5px;max-width:70ch;">A landing view added to the Supplier Portal (§13.3): legs awaiting acknowledgement, legs awaiting POD, an accrual status summary (Accrued / Matched / Available to Export / Paid, §10.2) — the "when will I get paid" visibility, without exposing internal margin data — and any open Exceptions tied to their own legs, such as an accrual/invoice variance flagged for review.</p>
+    </section>
+
+    <!-- 17 NFR -->
+    <section id="nfr">
+      <h2><span class="secnum">17</span>Non-Functional Requirements</h2>
+      <div class="grid3">
+        <div class="card"><h4>Security</h4><p style="font-size:13px;margin:6px 0 0;">Encryption in transit (TLS) and at rest, field-level encryption for banking/PII, OWASP-aligned API hardening, and SQL Server Row-Level Security enforcing tenant isolation as a second, independent layer beneath the application (§4.1).</p></div>
+        <div class="card"><h4>Scalability</h4><p style="font-size:13px;margin:6px 0 0;">Stateless API tier behind a load balancer, read replicas for reporting queries, horizontal scale-out per traffic growth as countries are added.</p></div>
+        <div class="card"><h4>Localisation</h4><p style="font-size:13px;margin:6px 0 0;">UI strings, date/number formats, and legal document templates configurable per country; currency and unit formatting follow the user's company locale.</p></div>
+        <div class="card"><h4>Auditability</h4><p style="font-size:13px;margin:6px 0 0;">Treated as a first-class platform function, not a per-module afterthought — full detail in §12.</p></div>
+        <div class="card"><h4>Availability</h4><p style="font-size:13px;margin:6px 0 0;">Target 99.9% for the API tier; scheduled maintenance windows communicated per region to avoid peak dispatch hours; full backup/DR posture and RPO/RTO targets in §15.</p></div>
+        <div class="card"><h4>Observability</h4><p style="font-size:13px;margin:6px 0 0;">Structured logging, distributed tracing across API modules, and health/metrics endpoints for infrastructure monitoring.</p></div>
+      </div>
+    </section>
+
+    <!-- 18 STRUCTURE -->
+    <section id="structure">
+      <h2><span class="secnum">18</span>Solution Structure</h2>
+      <p class="lede">Suggested top-level layout — a modular monolith in one .NET solution, with the SPA as a sibling project.</p>
+      <div class="tablewrap">
+        <table>
+          <thead><tr><th>Path</th><th>Contents</th></tr></thead>
+          <tbody>
+            <tr><td class="mono">/src/Tms.Api</td><td>ASP.NET Core host, controllers, auth middleware, OpenAPI spec</td></tr>
+            <tr><td class="mono">/src/Tms.Modules.Loads</td><td>Load/leg domain, dispatch services, status lifecycle</td></tr>
+            <tr><td class="mono">/src/Tms.Modules.Fleet</td><td>Vehicle, trailer, driver masters</td></tr>
+            <tr><td class="mono">/src/Tms.Modules.Rating</td><td>Rate cards, currency conversion, margin engine</td></tr>
+            <tr><td class="mono">/src/Tms.Modules.Debrief</td><td>Debrief capture, exception rules</td></tr>
+            <tr><td class="mono">/src/Tms.Modules.Billing</td><td>Invoices, credit notes, subcontractor expenses</td></tr>
+            <tr><td class="mono">/src/Tms.Modules.Audit</td><td>SaveChanges interceptor, AuditEntry store, audit viewer/export API (§12)</td></tr>
+            <tr><td class="mono">/src/Tms.Modules.Privacy</td><td>RetentionPolicy engine, DataSubjectRequest workflow, anonymization jobs (§14)</td></tr>
+            <tr><td class="mono">/src/Tms.Modules.Exceptions</td><td>Shared Exception entity, lifecycle, and scoped query API feeding all three dashboards (§16)</td></tr>
+            <tr><td class="mono">/src/Tms.Modules.Identity</td><td>Users, roles, functions, API clients</td></tr>
+            <tr><td class="mono">/src/Tms.Modules.Integration</td><td>Webhook publishing, partner API clients, accounting export adapters (Xero et al., §11.4)</td></tr>
+            <tr><td class="mono">/src/Tms.Infrastructure</td><td>EF Core DbContext, migrations, Row-Level Security policies, tenant-resolution middleware (§4.1)</td></tr>
+            <tr><td class="mono">/src/Tms.Shared</td><td>Cross-module contracts (events, DTOs)</td></tr>
+            <tr><td class="mono">/web/tms-app</td><td>Vue 3 SPA — feature-folder structure mirroring the API modules (internal staff), dashboard landing page (§16.2)</td></tr>
+            <tr><td class="mono">/web/tms-customer-portal</td><td>Vue 3 SPA — Client-scoped: dashboard (§16.3), loads, invoices, credit notes, credit status (§13.2)</td></tr>
+            <tr><td class="mono">/web/tms-supplier-portal</td><td>Vue 3 SPA — Subcontractor-scoped: dashboard (§16.4), allocated legs, load confirmations, POD upload (§13.3)</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- 19 ROADMAP -->
+    <section id="roadmap">
+      <h2><span class="secnum">19</span>Delivery Roadmap</h2>
+      <div class="phase">
+        <div class="ph-num">1</div>
+        <div>
+          <span class="when">MVP</span>
+          <h4>Single-country foundation</h4>
+          <p style="font-size:13.5px;margin:0;">Tenant/company scoping with Row-Level Security enforced from day one (§4.1), automated backups with a defined RPO (§15.1), Identity/RBAC, the audit interceptor and AuditEntry store (§12), RetentionPolicy fields on Company (§14.2) so no retrospective backfill is needed later, client &amp; vehicle/driver masters, load + leg capture with full status lifecycle (own fleet only), basic sell rating, cost centre tagging.</p>
+        </div>
+      </div>
+      <div class="phase">
+        <div class="ph-num">2</div>
+        <div>
+          <span class="when">Phase 2</span>
+          <h4>Subcontracting &amp; debriefing</h4>
+          <p style="font-size:13.5px;margin:0;">Subcontractor master, buy-rate cards, margin engine, full driver debriefing workflow with exception handling, invoicing &amp; credit notes, the financial calendar with period close and debtors roll-over (§10.3), accrual-basis subcontractor payables, the shared Exception mechanism (§16.1), and the Supplier Portal with its dashboard for load confirmation acknowledgement, POD attachment, and accrual status (§16.4).</p>
+        </div>
+      </div>
+      <div class="phase">
+        <div class="ph-num">3</div>
+        <div>
+          <span class="when">Phase 3</span>
+          <h4>Multi-country &amp; API</h4>
+          <p style="font-size:13.5px;margin:0;">Country/currency scoping, exchange-rate engine, public REST API, OAuth2 client-credentials, first webhook integrations, the Customer Portal for load/invoice visibility and credit status, the first-party Xero accounting adapter (§11.4), the full data subject request/erasure workflow (§14.3) ahead of any EU or multi-country rollout, and the internal reporting dashboard (§16.2) alongside the Customer Portal's own dashboard (§16.3).</p>
+        </div>
+      </div>
+      <div class="phase">
+        <div class="ph-num">4</div>
+        <div>
+          <span class="when">Phase 4</span>
+          <h4>Scale &amp; optimise</h4>
+          <p style="font-size:13.5px;margin:0;">Group-level roll-up reporting, telematics integration, additional country onboarding, regional DR failover configured and drilled (§15.3–15.4), the silo database option for enterprise tenants (§4.2), performance tuning for peak dispatch load.</p>
+        </div>
+      </div>
+    </section>
+
+  </main>
+
+  <footer>
+    Transport Management System — Architecture &amp; Design Specification · Draft for review · Diagrams render as Mermaid.
+  </footer>
+
+</div>
+
+<script>
+  document.querySelectorAll('nav.toc a').forEach(a=>{
+    a.addEventListener('click', e=>{
+      const id = a.getAttribute('href').slice(1);
+      const el = document.getElementById(id);
+      if(el){ e.preventDefault(); el.scrollIntoView({behavior:'smooth', block:'start'}); }
+    });
+  });
+</script>

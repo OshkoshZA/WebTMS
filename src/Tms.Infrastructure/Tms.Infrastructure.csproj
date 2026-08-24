@@ -1,0 +1,33 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <ItemGroup>
+    <ProjectReference Include="..\Tms.Modules.Identity\Tms.Modules.Identity.csproj" />
+    <ProjectReference Include="..\Tms.Modules.Fleet\Tms.Modules.Fleet.csproj" />
+    <ProjectReference Include="..\Tms.Modules.Loads\Tms.Modules.Loads.csproj" />
+    <ProjectReference Include="..\Tms.Modules.Rating\Tms.Modules.Rating.csproj" />
+    <ProjectReference Include="..\Tms.Modules.Debrief\Tms.Modules.Debrief.csproj" />
+    <ProjectReference Include="..\Tms.Modules.Billing\Tms.Modules.Billing.csproj" />
+    <ProjectReference Include="..\Tms.Modules.Integration\Tms.Modules.Integration.csproj" />
+    <ProjectReference Include="..\Tms.Modules.Audit\Tms.Modules.Audit.csproj" />
+    <ProjectReference Include="..\Tms.Modules.Privacy\Tms.Modules.Privacy.csproj" />
+    <ProjectReference Include="..\Tms.Modules.Exceptions\Tms.Modules.Exceptions.csproj" />
+    <ProjectReference Include="..\Tms.Shared\Tms.Shared.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.AspNetCore.Identity.EntityFrameworkCore" Version="8.0.10" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Design" Version="8.0.10">
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+      <PrivateAssets>all</PrivateAssets>
+    </PackageReference>
+    <PackageReference Include="Microsoft.EntityFrameworkCore.SqlServer" Version="8.0.10" />
+    <PackageReference Include="Microsoft.Extensions.Configuration.UserSecrets" Version="8.0.0" />
+  </ItemGroup>
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+
+</Project>
