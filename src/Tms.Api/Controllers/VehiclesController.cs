@@ -106,4 +106,16 @@ public class VehiclesController : ControllerBase
         await _db.SaveChangesAsync(ct);
         return NoContent();
     }
+
+    /// <summary>Reverses a Deactivate — the only path back to Active, mirroring how Deactivate is the only path out of it.</summary>
+    [HttpPost("{id:guid}/reactivate")]
+    public async Task<IActionResult> Reactivate(Guid id, CancellationToken ct)
+    {
+        var vehicle = await _db.Vehicles.FirstOrDefaultAsync(v => v.Id == id, ct);
+        if (vehicle is null) return NotFound();
+
+        vehicle.Status = VehicleStatus.Active;
+        await _db.SaveChangesAsync(ct);
+        return NoContent();
+    }
 }

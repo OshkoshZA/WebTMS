@@ -89,11 +89,14 @@ public class DriversController : ControllerBase
 
         // Active <-> OnLeave is a routine, reversible operational change (unlike
         // VehicleStatus, which has no equivalent middle state), so it's fine to allow
-        // here — but Deactivated is a one-way, §11.5 "never a hard delete" terminal
-        // state and must only be reached through the dedicated Deactivate action below,
-        // never as a side effect of an otherwise-ordinary field edit.
+        // here — but Deactivated is a one-way-in, one-way-out terminal state (§11.5
+        // "never a hard delete") and must only be entered or left through the
+        // dedicated Deactivate/Reactivate actions below, never as a side effect of an
+        // otherwise-ordinary field edit.
         if (request.Status == DriverStatus.Deactivated && driver.Status != DriverStatus.Deactivated)
             return Conflict("Deactivating a driver requires the dedicated deactivate action, not a general update.");
+        if (driver.Status == DriverStatus.Deactivated && request.Status != DriverStatus.Deactivated)
+            return Conflict("Reactivating a driver requires the dedicated reactivate action, not a general update.");
 
         // EmployeeNo is deliberately not editable here — it's the driver's stable identifier.
         driver.Name = request.Name;
@@ -114,6 +117,18 @@ public class DriversController : ControllerBase
         if (driver is null) return NotFound();
 
         driver.Status = DriverStatus.Deactivated; // never a hard delete — §11.5
+        await _db.SaveChangesAsync(ct);
+        return NoContent();
+    }
+
+    /// <summary>Reverses a Deactivate, back to Active — the only path out of Deactivated, mirroring how Deactivate is the only path in.</summary>
+    [HttpPost("{id:guid}/reactivate")]
+    public async Task<IActionResult> Reactivate(Guid id, CancellationToken ct)
+    {
+        var driver = await _db.Drivers.FirstOrDefaultAsync(d => d.Id == id, ct);
+        if (driver is null) return NotFound();
+
+        driver.Status = DriverStatus.Active;
         await _db.SaveChangesAsync(ct);
         return NoContent();
     }
