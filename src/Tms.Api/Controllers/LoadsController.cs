@@ -85,6 +85,9 @@ public class LoadsController : ControllerBase
         var client = await _db.Clients.FirstOrDefaultAsync(c => c.Id == request.ClientId, ct);
         if (client is null) return NotFound($"Client {request.ClientId} was not found.");
 
+        if (!await _db.LoadTypes.AnyAsync(lt => lt.Id == request.LoadTypeId, ct))
+            return NotFound($"Load type {request.LoadTypeId} was not found.");
+
         // A brand-new load carries no sell value yet, so the only thing worth
         // checking here is whether the client is *already* over limit from prior
         // loads — in which case starting another one is refused outright too.
@@ -300,6 +303,9 @@ public class LoadsController : ControllerBase
 
         if (!await _db.Commodities.AnyAsync(c => c.Id == request.CommodityId, ct))
             return NotFound($"Commodity {request.CommodityId} was not found.");
+
+        if (!await _db.UnitsOfMeasure.AnyAsync(u => u.Id == request.UnitOfMeasureId, ct))
+            return NotFound($"Unit of measure {request.UnitOfMeasureId} was not found.");
 
         var client = await _db.Clients.FirstOrDefaultAsync(c => c.Id == load.ClientId, ct);
         if (client is null) return NotFound($"Client {load.ClientId} was not found.");
