@@ -132,6 +132,13 @@ public class LoadsController : ControllerBase
         var load = await _db.Loads.Include(l => l.Legs).FirstOrDefaultAsync(l => l.Id == id, ct);
         if (load is null) return NotFound();
 
+        if (!await _db.Locations.AnyAsync(l => l.Id == request.OriginLocationId, ct))
+            return NotFound($"Location {request.OriginLocationId} (origin) was not found.");
+        if (!await _db.Locations.AnyAsync(l => l.Id == request.DestinationLocationId, ct))
+            return NotFound($"Location {request.DestinationLocationId} (destination) was not found.");
+        if (!await _db.CostCentres.AnyAsync(c => c.Id == request.CostCentreId, ct))
+            return NotFound($"Cost centre {request.CostCentreId} was not found.");
+
         var leg = new LoadLeg
         {
             TenantId = _tenantContext.TenantId.Value,
@@ -277,6 +284,9 @@ public class LoadsController : ControllerBase
 
         var leg = await _db.LoadLegs.FirstOrDefaultAsync(l => l.Id == legId && l.LoadId == id, ct);
         if (leg is null) return NotFound($"Leg {legId} was not found on load {id}.");
+
+        if (!await _db.Commodities.AnyAsync(c => c.Id == request.CommodityId, ct))
+            return NotFound($"Commodity {request.CommodityId} was not found.");
 
         var client = await _db.Clients.FirstOrDefaultAsync(c => c.Id == load.ClientId, ct);
         if (client is null) return NotFound($"Client {load.ClientId} was not found.");
