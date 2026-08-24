@@ -11,16 +11,23 @@ public record LoginRequest(string Email, string Password, Guid? CompanyId);
 public record LoginResponse(
     string AccessToken,
     DateTimeOffset ExpiresAt,
+    string RefreshToken,
+    DateTimeOffset RefreshTokenExpiresAt,
     Guid TenantId,
     Guid CompanyId,
     IReadOnlyList<string> Roles,
     IReadOnlyList<string> Functions);
 
+public record RefreshRequest(string RefreshToken);
+public record RefreshResponse(
+    string AccessToken, DateTimeOffset ExpiresAt, string RefreshToken, DateTimeOffset RefreshTokenExpiresAt);
+
 /// <summary>
 /// Interactive-user login (docs/architecture.html §11.1) — issues the JWT that
-/// TenantContextMiddleware later resolves TenantId/CompanyId from. There is no
-/// public self-registration endpoint here: internal users are provisioned by an
-/// admin (§07), so this controller only ever authenticates an existing account.
+/// TenantContextMiddleware later resolves TenantId/CompanyId from, plus a refresh
+/// token so that access token can stay short-lived. There is no public
+/// self-registration endpoint here: internal users are provisioned by an admin
+/// (§07), so this controller only ever authenticates an existing account.
 /// </summary>
 [ApiController]
 [Route("api/v1/auth")]
@@ -29,12 +36,18 @@ public class AuthController : ControllerBase
     private readonly UserManager<ApplicationUser> _userManager;
     private readonly TmsDbContext _db;
     private readonly JwtTokenService _tokenService;
+    private readonly RefreshTokenService _refreshTokens;
 
-    public AuthController(UserManager<ApplicationUser> userManager, TmsDbContext db, JwtTokenService tokenService)
+    public AuthController(
+        UserManager<ApplicationUser> userManager,
+        TmsDbContext db,
+        JwtTokenService tokenService,
+        RefreshTokenService refreshTokens)
     {
         _userManager = userManager;
         _db = db;
         _tokenService = tokenService;
+        _refreshTokens = refreshTokens;
     }
 
     [HttpPost("login")]
@@ -59,28 +72,77 @@ public class AuthController : ControllerBase
         if (assignment is null)
             return Forbid(); // authenticated, but not assigned to the requested Company
 
-        var roleIds = await _db.UserCompanyRoles
-            .Where(ucr => ucr.UserId == user.Id && ucr.CompanyId == assignment.CompanyId)
-            .Select(ucr => ucr.RoleId)
-            .ToListAsync(ct);
+        var (roleNames, functionCodes) = await ResolveRolesAndFunctionsAsync(user.Id, assignment.CompanyId, ct);
 
-        var roleNames = await _db.Roles
-            .Where(r => roleIds.Contains(r.Id))
-            .Select(r => r.Name!)
-            .ToListAsync(ct);
+        var accessToken = _tokenService.IssueAccessToken(user, assignment.CompanyId, roleNames, functionCodes);
 
-        // Role → RoleFunction → Function (§07) — resolved once, at login, into flat
-        // claims; FunctionAuthorizationHandler never has to walk this chain itself.
-        var functionCodes = await _db.RoleFunctions
-            .Where(rf => roleIds.Contains(rf.RoleId))
-            .Join(_db.Functions, rf => rf.FunctionId, f => f.Id, (rf, f) => f.Code)
-            .Distinct()
-            .ToListAsync(ct);
+        // A fresh login starts a brand new rotation family (§11.1) — every refresh
+        // from here on stays inside it until it's revoked (logout, expiry, or a
+        // reuse-detection trip).
+        var (refreshPlaintext, refreshRecord) =
+            _refreshTokens.Issue(user.TenantId, assignment.CompanyId, user.Id, Guid.NewGuid());
 
-        var token = _tokenService.IssueAccessToken(user, assignment.CompanyId, roleNames, functionCodes);
+        await _db.SaveChangesAsync(ct);
 
         return Ok(new LoginResponse(
-            token.AccessToken, token.ExpiresAt, user.TenantId, assignment.CompanyId, roleNames, functionCodes));
+            accessToken.AccessToken, accessToken.ExpiresAt,
+            refreshPlaintext, refreshRecord.ExpiresAt,
+            user.TenantId, assignment.CompanyId, roleNames, functionCodes));
+    }
+
+    /// <summary>
+    /// Exchanges a refresh token for a new access token and a new refresh token
+    /// (§11.1) — rotation, not reuse: the presented token is revoked in the same
+    /// call. Presenting a token that's already been revoked (i.e. already used, or
+    /// already logged out) is treated as possible theft and revokes the entire
+    /// rotation family, forcing a fresh login.
+    /// </summary>
+    [HttpPost("refresh")]
+    public async Task<ActionResult<RefreshResponse>> Refresh(RefreshRequest request, CancellationToken ct)
+    {
+        var existing = await _refreshTokens.FindByPlaintextAsync(request.RefreshToken, ct);
+        if (existing is null)
+            return Unauthorized(new { error = "invalid_grant" });
+
+        if (existing.RevokedAt is not null)
+        {
+            await _refreshTokens.RevokeFamilyAsync(existing.FamilyId, ct);
+            await _db.SaveChangesAsync(ct);
+            return Unauthorized(new { error = "invalid_grant", detail = "Refresh token reuse detected; session revoked." });
+        }
+
+        if (existing.ExpiresAt < DateTimeOffset.UtcNow)
+            return Unauthorized(new { error = "invalid_grant" });
+
+        var user = await _userManager.FindByIdAsync(existing.UserId.ToString());
+        if (user is null)
+            return Unauthorized(new { error = "invalid_grant" });
+
+        existing.RevokedAt = DateTimeOffset.UtcNow; // this one is now spent — rotation, not reuse
+
+        var (roleNames, functionCodes) = await ResolveRolesAndFunctionsAsync(user.Id, existing.CompanyId, ct);
+        var accessToken = _tokenService.IssueAccessToken(user, existing.CompanyId, roleNames, functionCodes);
+        var (refreshPlaintext, refreshRecord) =
+            _refreshTokens.Issue(existing.TenantId, existing.CompanyId, user.Id, existing.FamilyId);
+
+        await _db.SaveChangesAsync(ct);
+
+        return Ok(new RefreshResponse(
+            accessToken.AccessToken, accessToken.ExpiresAt, refreshPlaintext, refreshRecord.ExpiresAt));
+    }
+
+    /// <summary>Revokes a refresh token — always 204, whether or not the token was valid, so this can't be used to probe for valid tokens.</summary>
+    [HttpPost("logout")]
+    public async Task<IActionResult> Logout(RefreshRequest request, CancellationToken ct)
+    {
+        var existing = await _refreshTokens.FindByPlaintextAsync(request.RefreshToken, ct);
+        if (existing is not null && existing.RevokedAt is null)
+        {
+            existing.RevokedAt = DateTimeOffset.UtcNow;
+            await _db.SaveChangesAsync(ct);
+        }
+
+        return NoContent();
     }
 
     /// <summary>
@@ -88,7 +150,8 @@ public class AuthController : ControllerBase
     /// system-to-system counterpart to <see cref="Login"/>. Standard RFC 6749 §4.4
     /// shape: form-encoded request, "access_token"/"token_type"/"expires_in" response,
     /// an "error" body on failure — so any off-the-shelf OAuth2 client library can
-    /// call this without knowing anything TMS-specific.
+    /// call this without knowing anything TMS-specific. No refresh token here: a
+    /// machine client just requests a new access token with its client secret again.
     /// </summary>
     [HttpPost("token")]
     [Consumes("application/x-www-form-urlencoded")]
@@ -140,5 +203,28 @@ public class AuthController : ControllerBase
             token_type = "Bearer",
             expires_in = (int)(token.ExpiresAt - DateTimeOffset.UtcNow).TotalSeconds
         });
+    }
+
+    /// <summary>Role → RoleFunction → Function (§07) for one user in one company — shared by Login and Refresh so they can never drift apart.</summary>
+    private async Task<(IReadOnlyList<string> RoleNames, IReadOnlyList<string> FunctionCodes)> ResolveRolesAndFunctionsAsync(
+        Guid userId, Guid companyId, CancellationToken ct)
+    {
+        var roleIds = await _db.UserCompanyRoles
+            .Where(ucr => ucr.UserId == userId && ucr.CompanyId == companyId)
+            .Select(ucr => ucr.RoleId)
+            .ToListAsync(ct);
+
+        var roleNames = await _db.Roles
+            .Where(r => roleIds.Contains(r.Id))
+            .Select(r => r.Name!)
+            .ToListAsync(ct);
+
+        var functionCodes = await _db.RoleFunctions
+            .Where(rf => roleIds.Contains(rf.RoleId))
+            .Join(_db.Functions, rf => rf.FunctionId, f => f.Id, (rf, f) => f.Code)
+            .Distinct()
+            .ToListAsync(ct);
+
+        return (roleNames, functionCodes);
     }
 }

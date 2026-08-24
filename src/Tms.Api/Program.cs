@@ -19,6 +19,7 @@ builder.Services.AddScoped<ITenantContext>(sp => sp.GetRequiredService<HttpTenan
 builder.Services.AddScoped<ICurrentUserAccessor>(sp => sp.GetRequiredService<HttpTenantContext>());
 builder.Services.AddScoped<AuditSaveChangesInterceptor>();
 builder.Services.AddScoped<Tms.Api.Auth.JwtTokenService>();
+builder.Services.AddScoped<Tms.Api.Auth.RefreshTokenService>();
 builder.Services.AddScoped<Tms.Api.Services.CreditExposureService>();
 
 // --- Database (§4.1: EF Core global query filters are the application-layer half of

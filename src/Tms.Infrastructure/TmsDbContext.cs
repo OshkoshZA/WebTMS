@@ -50,6 +50,7 @@ public class TmsDbContext : IdentityDbContext<ApplicationUser, ApplicationRole, 
     public DbSet<ApiClient> ApiClients => Set<ApiClient>();
     public DbSet<ApiClientSecret> ApiClientSecrets => Set<ApiClientSecret>();
     public DbSet<ApiClientRole> ApiClientRoles => Set<ApiClientRole>();
+    public DbSet<RefreshToken> RefreshTokens => Set<RefreshToken>();
 
     // Fleet (§5.1)
     public DbSet<Location> Locations => Set<Location>();
