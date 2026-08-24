@@ -8,7 +8,13 @@ using Tms.Modules.Identity;
 namespace Tms.Api.Controllers;
 
 public record LoginRequest(string Email, string Password, Guid? CompanyId);
-public record LoginResponse(string AccessToken, DateTimeOffset ExpiresAt, Guid TenantId, Guid CompanyId, IReadOnlyList<string> Roles);
+public record LoginResponse(
+    string AccessToken,
+    DateTimeOffset ExpiresAt,
+    Guid TenantId,
+    Guid CompanyId,
+    IReadOnlyList<string> Roles,
+    IReadOnlyList<string> Functions);
 
 /// <summary>
 /// Interactive-user login (docs/architecture.html §11.1) — issues the JWT that
@@ -53,13 +59,27 @@ public class AuthController : ControllerBase
         if (assignment is null)
             return Forbid(); // authenticated, but not assigned to the requested Company
 
-        var roleNames = await _db.UserCompanyRoles
+        var roleIds = await _db.UserCompanyRoles
             .Where(ucr => ucr.UserId == user.Id && ucr.CompanyId == assignment.CompanyId)
-            .Join(_db.Roles, ucr => ucr.RoleId, r => r.Id, (ucr, r) => r.Name!)
+            .Select(ucr => ucr.RoleId)
             .ToListAsync(ct);
 
-        var token = _tokenService.IssueAccessToken(user, assignment.CompanyId, roleNames);
+        var roleNames = await _db.Roles
+            .Where(r => roleIds.Contains(r.Id))
+            .Select(r => r.Name!)
+            .ToListAsync(ct);
 
-        return Ok(new LoginResponse(token.AccessToken, token.ExpiresAt, user.TenantId, assignment.CompanyId, roleNames));
+        // Role → RoleFunction → Function (§07) — resolved once, at login, into flat
+        // claims; FunctionAuthorizationHandler never has to walk this chain itself.
+        var functionCodes = await _db.RoleFunctions
+            .Where(rf => roleIds.Contains(rf.RoleId))
+            .Join(_db.Functions, rf => rf.FunctionId, f => f.Id, (rf, f) => f.Code)
+            .Distinct()
+            .ToListAsync(ct);
+
+        var token = _tokenService.IssueAccessToken(user, assignment.CompanyId, roleNames, functionCodes);
+
+        return Ok(new LoginResponse(
+            token.AccessToken, token.ExpiresAt, user.TenantId, assignment.CompanyId, roleNames, functionCodes));
     }
 }

@@ -54,15 +54,18 @@ public class LoadsController : ControllerBase
     private readonly ITenantContext _tenantContext;
     private readonly ICurrentUserAccessor _currentUser;
     private readonly CreditExposureService _creditExposure;
+    private readonly IAuthorizationService _authorizationService;
 
     public LoadsController(
         TmsDbContext db,
         ITenantContext tenantContext,
         ICurrentUserAccessor currentUser,
-        CreditExposureService creditExposure)
+        CreditExposureService creditExposure,
+        IAuthorizationService authorizationService)
     {
         _db = db;
         _tenantContext = tenantContext;
+        _authorizationService = authorizationService;
         _currentUser = currentUser;
         _creditExposure = creditExposure;
     }
@@ -373,11 +376,11 @@ public class LoadsController : ControllerBase
 
     /// <summary>
     /// Runs the §5.4 hard stop. Returns null when the action is allowed to proceed;
-    /// otherwise the ActionResult to return directly. An override reason bypasses the
-    /// stop and is written to the audit trail — but is only gated behind the Admin role
-    /// for now. TODO (§07): gate this behind the real client.creditlimit.override
-    /// function once function-based authorization policies exist; a role check is a
-    /// stand-in, not the real thing.
+    /// otherwise the ActionResult to return directly. An override reason is only
+    /// honoured for a caller whose JWT carries the client.creditlimit.override
+    /// function claim (§07) — resolved from their role at login, checked here via
+    /// the same policy mechanism any endpoint could use — and is written to the
+    /// audit trail either way.
     /// </summary>
     private async Task<ActionResult?> CheckCreditAsync(
         Tms.Modules.Loads.Client client,
@@ -391,8 +394,17 @@ public class LoadsController : ControllerBase
 
         if (!string.IsNullOrWhiteSpace(overrideReason))
         {
-            if (!User.IsInRole("Admin"))
-                return Forbid("Overriding the credit limit requires the client.creditlimit.override function.");
+            var authResult = await _authorizationService.AuthorizeAsync(User, "client.creditlimit.override");
+            if (!authResult.Succeeded)
+            {
+                return new ObjectResult(new ProblemDetails
+                {
+                    Title = "Missing function",
+                    Status = StatusCodes.Status403Forbidden,
+                    Detail = "Overriding the credit limit requires the client.creditlimit.override function."
+                })
+                { StatusCode = StatusCodes.Status403Forbidden };
+            }
 
             _db.Set<AuditEntry>().Add(new AuditEntry
             {

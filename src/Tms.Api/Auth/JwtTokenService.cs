@@ -22,7 +22,11 @@ public class JwtTokenService
         _configuration = configuration;
     }
 
-    public IssuedToken IssueAccessToken(ApplicationUser user, Guid companyId, IEnumerable<string> roleNames)
+    public IssuedToken IssueAccessToken(
+        ApplicationUser user,
+        Guid companyId,
+        IEnumerable<string> roleNames,
+        IEnumerable<string> functionCodes)
     {
         var jwtSection = _configuration.GetSection("Jwt");
         var signingKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwtSection["SigningKey"] ?? string.Empty));
@@ -38,6 +42,10 @@ public class JwtTokenService
             new("company_id", companyId.ToString())
         };
         claims.AddRange(roleNames.Select(r => new Claim(ClaimTypes.Role, r)));
+        // One claim per granted function (§07) — FunctionAuthorizationHandler checks these,
+        // not role names, so a role can be renamed or restructured without touching any
+        // [Authorize(Policy = "...")] attribute anywhere in the API.
+        claims.AddRange(functionCodes.Distinct().Select(f => new Claim("function", f)));
 
         var token = new JwtSecurityToken(
             issuer: jwtSection["Issuer"],

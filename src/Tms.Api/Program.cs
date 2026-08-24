@@ -1,5 +1,6 @@
 using System.Text;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
@@ -60,6 +61,10 @@ builder.Services
         };
     });
 
+// Function-based authorization (§07): any function code works as a policy name
+// without being registered by hand — see FunctionPolicyProvider.
+builder.Services.AddSingleton<IAuthorizationPolicyProvider, FunctionPolicyProvider>();
+builder.Services.AddSingleton<IAuthorizationHandler, FunctionAuthorizationHandler>();
 builder.Services.AddAuthorization();
 
 builder.Services.AddControllers();

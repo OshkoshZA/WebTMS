@@ -7,10 +7,10 @@ using Tms.Shared;
 namespace Tms.Api.Seed;
 
 /// <summary>
-/// Development-only bootstrap data — a Tenant, Company, and one admin user with a
-/// Company-scoped role (docs/architecture.html §04, §07) — so a freshly-created
-/// database has something to log in as. Idempotent: does nothing once a Tenant
-/// already exists. Never runs outside the Development environment.
+/// Development-only bootstrap data — a Tenant, Company, one admin user with a
+/// Company-scoped role (docs/architecture.html §04, §07), and the Function catalog
+/// (§07) — so a freshly-created database has something to log in as. Never runs
+/// outside the Development environment.
 /// </summary>
 public static class DevelopmentSeeder
 {
@@ -21,13 +21,21 @@ public static class DevelopmentSeeder
     {
         using var scope = services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<TmsDbContext>();
-
-        if (await db.Tenants.IgnoreQueryFilters().AnyAsync())
-            return; // already seeded
-
-        var userManager = scope.ServiceProvider.GetRequiredService<UserManager<ApplicationUser>>();
         var roleManager = scope.ServiceProvider.GetRequiredService<RoleManager<ApplicationRole>>();
         var logger = scope.ServiceProvider.GetRequiredService<ILogger<object>>();
+
+        if (!await db.Tenants.IgnoreQueryFilters().AnyAsync())
+        {
+            await SeedTenantCompanyAndAdminAsync(scope.ServiceProvider, db, logger);
+        }
+
+        await EnsureFunctionCatalogAsync(db, roleManager, logger);
+    }
+
+    private static async Task SeedTenantCompanyAndAdminAsync(IServiceProvider sp, TmsDbContext db, ILogger logger)
+    {
+        var userManager = sp.GetRequiredService<UserManager<ApplicationUser>>();
+        var roleManager = sp.GetRequiredService<RoleManager<ApplicationRole>>();
 
         var country = new Country { Code = "ZA", Name = "South Africa" };
         var currency = new Currency { Code = "ZAR", Name = "South African Rand", Symbol = "R" };
@@ -102,5 +110,44 @@ public static class DevelopmentSeeder
         logger.LogInformation(
             "Seeded development data — Tenant '{Tenant}', Company '{Company}'. Log in with {Email} / {Password}",
             tenant.Name, company.LegalName, AdminEmail, AdminPassword);
+    }
+
+    /// <summary>
+    /// Registers the known Function catalog (§07: "new functions are registered by
+    /// the API as new endpoints ship") and grants the demo Admin role whatever it
+    /// needs. Runs every startup, not just on first seed, so a function added after
+    /// the database already exists still gets created and granted with no manual step.
+    /// </summary>
+    private static async Task EnsureFunctionCatalogAsync(TmsDbContext db, RoleManager<ApplicationRole> roleManager, ILogger logger)
+    {
+        var knownFunctions = new[]
+        {
+            ("client.creditlimit.override",
+             "Push a load or commodity line through over a client's credit limit, with a logged reason (§5.4).")
+        };
+
+        var adminRole = await roleManager.FindByNameAsync("Admin");
+
+        foreach (var (code, description) in knownFunctions)
+        {
+            var function = await db.Functions.FirstOrDefaultAsync(f => f.Code == code);
+            if (function is null)
+            {
+                function = new Function { Code = code, Description = description };
+                db.Functions.Add(function);
+                await db.SaveChangesAsync();
+            }
+
+            if (adminRole is null) continue; // no demo tenant seeded yet — nothing to grant to
+
+            var alreadyGranted = await db.RoleFunctions
+                .AnyAsync(rf => rf.RoleId == adminRole.Id && rf.FunctionId == function.Id);
+            if (!alreadyGranted)
+            {
+                db.RoleFunctions.Add(new RoleFunction { RoleId = adminRole.Id, FunctionId = function.Id });
+                await db.SaveChangesAsync();
+                logger.LogInformation("Granted function '{Function}' to role 'Admin'", code);
+            }
+        }
     }
 }
