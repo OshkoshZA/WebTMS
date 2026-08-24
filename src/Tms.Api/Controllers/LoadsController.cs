@@ -260,16 +260,23 @@ public class LoadsController : ControllerBase
         return NoContent();
     }
 
-    /// <summary>Resumes a load that was On Hold, returning it to In Transit (§5.2 Fig. 3).</summary>
+    /// <summary>
+    /// Resumes a load that was On Hold (§5.2 Fig. 3) — recomputed from its legs' actual
+    /// state rather than assumed back to In Transit, since a leg can still be marked
+    /// Delivered while the load is held (DeliverLeg has no On-Hold guard, unlike
+    /// StartLeg/AllocateLeg/AddLeg): if every leg finished while paused, releasing the
+    /// hold must land on Delivered, not silently revert to In Transit.
+    /// </summary>
     [HttpPost("{id:guid}/release-hold")]
     public async Task<IActionResult> ReleaseHold(Guid id, CancellationToken ct)
     {
-        var load = await _db.Loads.FirstOrDefaultAsync(l => l.Id == id, ct);
+        var load = await _db.Loads.Include(l => l.Legs).FirstOrDefaultAsync(l => l.Id == id, ct);
         if (load is null) return NotFound();
         if (load.Status != LoadStatus.OnHold)
             return Conflict($"Load is {load.Status}, not On Hold.");
 
-        await TransitionLoadStatusAsync(load, LoadStatus.InTransit, reason: null, ct);
+        var next = ComputeStatusFromLegs(load.Legs);
+        await TransitionLoadStatusAsync(load, next, reason: null, ct);
         await _db.SaveChangesAsync(ct);
         return NoContent();
     }
@@ -358,17 +365,19 @@ public class LoadsController : ControllerBase
         if (load.Status is LoadStatus.OnHold or LoadStatus.Cancelled)
             return;
 
-        var legs = load.Legs;
-        var next = legs.Count == 0
+        var next = ComputeStatusFromLegs(load.Legs);
+        if (next != load.Status)
+            await TransitionLoadStatusAsync(load, next, reason: null, ct);
+    }
+
+    /// <summary>Pure leg-status rollup (§5.2) — shared by RecomputeLoadStatusAsync and ReleaseHold, which need the same answer but at different points relative to the On-Hold guard.</summary>
+    private static LoadStatus ComputeStatusFromLegs(IReadOnlyCollection<LoadLeg> legs) =>
+        legs.Count == 0
             ? LoadStatus.Booked
             : legs.All(l => l.Status == LoadLegStatus.Delivered) ? LoadStatus.Delivered
             : legs.Any(l => l.Status is LoadLegStatus.InTransit or LoadLegStatus.Delivered) ? LoadStatus.InTransit
             : legs.All(l => l.Status == LoadLegStatus.Allocated) ? LoadStatus.Allocated
             : LoadStatus.Booked;
-
-        if (next != load.Status)
-            await TransitionLoadStatusAsync(load, next, reason: null, ct);
-    }
 
     private Task TransitionLoadStatusAsync(Load load, LoadStatus next, string? reason, CancellationToken ct)
     {
