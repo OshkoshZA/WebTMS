@@ -1,4 +1,5 @@
 using System.Security.Cryptography;
+using Asp.Versioning;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;
@@ -27,7 +28,8 @@ public record UpdateRateLimitRequest(int RateLimitPerMinute);
 /// check in the API uses (§07), not a special case for this controller.
 /// </summary>
 [ApiController]
-[Route("api/v1/api-clients")]
+[ApiVersion("1.0")]
+[Route("api/v{version:apiVersion}/api-clients")]
 [Authorize]
 public class ApiClientsController : ControllerBase
 {

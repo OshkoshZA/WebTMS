@@ -1,6 +1,8 @@
 using System.Security.Claims;
 using System.Text;
 using System.Threading.RateLimiting;
+using Asp.Versioning;
+using Asp.Versioning.ApiExplorer;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Identity;
@@ -8,6 +10,7 @@ using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
 using Tms.Api.Auth;
+using Tms.Api.Swagger;
 using Tms.Infrastructure;
 using Tms.Modules.Audit;
 using Tms.Modules.Identity;
@@ -125,16 +128,45 @@ builder.Services.AddRateLimiter(options =>
     });
 });
 
+// --- API versioning (§11): a URL-segment scheme, matching the /api/v1/... convention
+// every route already used before this was wired up as a real mechanism rather than a
+// hardcoded string. A new version ships as another [ApiVersion] attribute on a
+// controller (or an action, for a per-endpoint bump) — existing v1 routes and clients
+// are never touched. ---
+builder.Services
+    .AddApiVersioning(options =>
+    {
+        options.DefaultApiVersion = new ApiVersion(1.0);
+        options.AssumeDefaultVersionWhenUnspecified = true;
+        options.ReportApiVersions = true; // echoes supported/deprecated versions in an api-supported-versions response header
+        options.ApiVersionReader = new UrlSegmentApiVersionReader();
+    })
+    .AddMvc()
+    .AddApiExplorer(options =>
+    {
+        options.GroupNameFormat = "'v'VVV";
+        options.SubstituteApiVersionInUrl = true;
+    });
+
 builder.Services.AddControllers();
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
+builder.Services.ConfigureOptions<ConfigureSwaggerOptions>();
 
 var app = builder.Build();
 
 if (app.Environment.IsDevelopment())
 {
     app.UseSwagger();
-    app.UseSwaggerUI();
+    app.UseSwaggerUI(options =>
+    {
+        foreach (var description in app.DescribeApiVersions())
+        {
+            options.SwaggerEndpoint(
+                $"/swagger/{description.GroupName}/swagger.json",
+                description.GroupName.ToUpperInvariant());
+        }
+    });
 
     // Demo Tenant/Company/admin user for local login — never runs outside Development.
     await Tms.Api.Seed.DevelopmentSeeder.SeedAsync(app.Services);

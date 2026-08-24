@@ -1,3 +1,4 @@
+using Asp.Versioning;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -46,7 +47,8 @@ public record LoadTrackingResponse(Guid LoadId, LoadStatus Status, IReadOnlyList
 /// fully wired; the rest picks up once those modules land.
 /// </summary>
 [ApiController]
-[Route("api/v1/loads")]
+[ApiVersion("1.0")]
+[Route("api/v{version:apiVersion}/loads")]
 [Authorize]
 public class LoadsController : ControllerBase
 {

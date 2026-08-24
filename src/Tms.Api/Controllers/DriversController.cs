@@ -1,3 +1,4 @@
+using Asp.Versioning;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -25,7 +26,8 @@ public record UpdateDriverRequest(
 
 /// <summary>Driver master data (docs/architecture.html §5.1) — follows the standard CRUD convention (§11.5).</summary>
 [ApiController]
-[Route("api/v1/drivers")]
+[ApiVersion("1.0")]
+[Route("api/v{version:apiVersion}/drivers")]
 [Authorize]
 public class DriversController : ControllerBase
 {

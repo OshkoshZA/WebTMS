@@ -1,3 +1,4 @@
+using Asp.Versioning;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -18,7 +19,8 @@ public record UpdateClientRequest(string Name, string RegistrationNo, decimal Cr
 /// credit history once Tms.Modules.Billing lands.
 /// </summary>
 [ApiController]
-[Route("api/v1/clients")]
+[ApiVersion("1.0")]
+[Route("api/v{version:apiVersion}/clients")]
 [Authorize]
 public class ClientsController : ControllerBase
 {
