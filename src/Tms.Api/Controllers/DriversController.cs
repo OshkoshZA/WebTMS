@@ -87,6 +87,14 @@ public class DriversController : ControllerBase
         if (request.HomeCostCentreId is Guid costCentreId && !await _db.CostCentres.AnyAsync(c => c.Id == costCentreId, ct))
             return NotFound($"Cost centre {costCentreId} was not found.");
 
+        // Active <-> OnLeave is a routine, reversible operational change (unlike
+        // VehicleStatus, which has no equivalent middle state), so it's fine to allow
+        // here — but Deactivated is a one-way, §11.5 "never a hard delete" terminal
+        // state and must only be reached through the dedicated Deactivate action below,
+        // never as a side effect of an otherwise-ordinary field edit.
+        if (request.Status == DriverStatus.Deactivated && driver.Status != DriverStatus.Deactivated)
+            return Conflict("Deactivating a driver requires the dedicated deactivate action, not a general update.");
+
         // EmployeeNo is deliberately not editable here — it's the driver's stable identifier.
         driver.Name = request.Name;
         driver.LicenceCode = request.LicenceCode;
