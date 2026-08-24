@@ -1,7 +1,10 @@
+using System.Security.Claims;
 using System.Text;
+using System.Threading.RateLimiting;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Identity;
+using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
 using Tms.Api.Auth;
@@ -41,9 +44,9 @@ builder.Services
     .AddEntityFrameworkStores<TmsDbContext>()
     .AddSignInManager();
 
-// --- Auth (§11.1): JWT bearer for interactive users and portal contacts; OAuth2
-// client-credentials for system-to-system integration partners is added alongside
-// this in a later phase once Tms.Modules.Integration is built out. ---
+// --- Auth (§11.1): JWT bearer validates both the interactive-user login flow and
+// the OAuth2 client-credentials grant — they produce the same kind of token, just
+// via different issuance paths (AuthController), so one scheme covers both. ---
 var jwtSection = builder.Configuration.GetSection("Jwt");
 builder.Services
     .AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
@@ -68,6 +71,60 @@ builder.Services.AddSingleton<IAuthorizationPolicyProvider, FunctionPolicyProvid
 builder.Services.AddSingleton<IAuthorizationHandler, FunctionAuthorizationHandler>();
 builder.Services.AddAuthorization();
 
+// --- Rate limiting (§11.1: "per-client rate limits"). Partitioned by the caller's
+// identity — client_id for an integration partner, the user id for an interactive
+// session, remote IP for anyone not yet authenticated — and sized from the
+// "rate_limit" claim JwtTokenService embeds at issuance, so no database lookup is
+// needed per request to size the limit. ---
+builder.Services.AddRateLimiter(options =>
+{
+    options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
+
+    options.OnRejected = async (context, ct) =>
+    {
+        var retryAfterSeconds = context.Lease.TryGetMetadata(MetadataName.RetryAfter, out var retryAfter)
+            ? (int)retryAfter.TotalSeconds
+            : 60;
+        context.HttpContext.Response.Headers.RetryAfter = retryAfterSeconds.ToString();
+        context.HttpContext.Response.ContentType = "application/json";
+        await context.HttpContext.Response.WriteAsync(
+            $"{{\"error\":\"rate_limit_exceeded\",\"retryAfterSeconds\":{retryAfterSeconds}}}", ct);
+    };
+
+    options.GlobalLimiter = PartitionedRateLimiter.Create<HttpContext, string>(httpContext =>
+    {
+        var user = httpContext.User;
+        var partitionKey = user.FindFirstValue("client_id")
+            ?? user.FindFirstValue(ClaimTypes.NameIdentifier)
+            ?? httpContext.Connection.RemoteIpAddress?.ToString()
+            ?? "unknown";
+
+        var permitLimit = int.TryParse(user.FindFirstValue("rate_limit"), out var claimed) ? claimed : 60;
+
+        return RateLimitPartition.GetFixedWindowLimiter(partitionKey, _ => new FixedWindowRateLimiterOptions
+        {
+            PermitLimit = permitLimit,
+            Window = TimeSpan.FromMinutes(1),
+            QueueLimit = 0
+        });
+    });
+
+    // A tighter, IP-based policy for the unauthenticated auth endpoints (login,
+    // token, refresh, §11.1) — exactly what brute-force/credential-stuffing
+    // targets, so it gets its own limit regardless of the not-yet-established
+    // caller identity the global limiter above would otherwise partition by.
+    options.AddPolicy("auth", httpContext =>
+    {
+        var ip = httpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown";
+        return RateLimitPartition.GetFixedWindowLimiter(ip, _ => new FixedWindowRateLimiterOptions
+        {
+            PermitLimit = 10,
+            Window = TimeSpan.FromMinutes(1),
+            QueueLimit = 0
+        });
+    });
+});
+
 builder.Services.AddControllers();
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
@@ -86,6 +143,7 @@ if (app.Environment.IsDevelopment())
 app.UseHttpsRedirection();
 
 app.UseAuthentication();
+app.UseRateLimiter(); // needs the User principal from UseAuthentication to partition by client_id/user id
 app.UseMiddleware<TenantContextMiddleware>(); // resolves TenantId/CompanyId before authorization runs
 app.UseAuthorization();
 

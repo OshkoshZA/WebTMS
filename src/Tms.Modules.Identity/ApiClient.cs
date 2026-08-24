@@ -21,6 +21,14 @@ public class ApiClient : CompanyScopedEntity
     public string ClientId { get; set; } = string.Empty;
     public ApiClientStatus Status { get; set; } = ApiClientStatus.Active;
     public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
+
+    /// <summary>
+    /// Per-client rate limit (docs/architecture.html §11.1 — "per-client rate
+    /// limits"). Embedded as a claim in every access token this client is issued
+    /// (§11.1), so the rate limiter can partition and size the limit per caller
+    /// without a database round-trip on every request.
+    /// </summary>
+    public int RateLimitPerMinute { get; set; } = 60;
 }
 
 /// <summary>One hashed secret for an ApiClient. Never store the plaintext value — it's shown to the caller exactly once, at issuance.</summary>

@@ -9,13 +9,16 @@ using Tms.Shared;
 
 namespace Tms.Api.Controllers;
 
-public record CreateApiClientRequest(string Name, Guid RoleId);
+public record CreateApiClientRequest(string Name, Guid RoleId, int? RateLimitPerMinute = null);
 
-public record CreateApiClientResponse(Guid Id, string Name, string ClientId, string ClientSecret);
+public record CreateApiClientResponse(Guid Id, string Name, string ClientId, string ClientSecret, int RateLimitPerMinute);
 
-public record ApiClientResponse(Guid Id, string Name, string ClientId, ApiClientStatus Status, DateTimeOffset CreatedAt);
+public record ApiClientResponse(
+    Guid Id, string Name, string ClientId, ApiClientStatus Status, int RateLimitPerMinute, DateTimeOffset CreatedAt);
 
 public record RotateSecretResponse(string ClientSecret);
+
+public record UpdateRateLimitRequest(int RateLimitPerMinute);
 
 /// <summary>
 /// Provisions system-to-system integration partners for the OAuth2 client-credentials
@@ -42,7 +45,7 @@ public class ApiClientsController : ControllerBase
     public async Task<ActionResult<IEnumerable<ApiClientResponse>>> List(CancellationToken ct)
         => Ok(await _db.ApiClients
             .OrderBy(c => c.Name)
-            .Select(c => new ApiClientResponse(c.Id, c.Name, c.ClientId, c.Status, c.CreatedAt))
+            .Select(c => new ApiClientResponse(c.Id, c.Name, c.ClientId, c.Status, c.RateLimitPerMinute, c.CreatedAt))
             .ToListAsync(ct));
 
     [HttpGet("{id:guid}")]
@@ -51,7 +54,7 @@ public class ApiClientsController : ControllerBase
         var client = await _db.ApiClients.FirstOrDefaultAsync(c => c.Id == id, ct);
         return client is null
             ? NotFound()
-            : Ok(new ApiClientResponse(client.Id, client.Name, client.ClientId, client.Status, client.CreatedAt));
+            : Ok(new ApiClientResponse(client.Id, client.Name, client.ClientId, client.Status, client.RateLimitPerMinute, client.CreatedAt));
     }
 
     /// <summary>Creates an integration partner and its first secret — the secret is returned once, here, and never again.</summary>
@@ -70,7 +73,8 @@ public class ApiClientsController : ControllerBase
             TenantId = _tenantContext.TenantId.Value,
             CompanyId = _tenantContext.CompanyId.Value,
             Name = request.Name,
-            ClientId = Guid.NewGuid().ToString("N")
+            ClientId = Guid.NewGuid().ToString("N"),
+            RateLimitPerMinute = request.RateLimitPerMinute is int rl and > 0 ? rl : 60
         };
         _db.ApiClients.Add(client);
 
@@ -93,7 +97,23 @@ public class ApiClientsController : ControllerBase
         await _db.SaveChangesAsync(ct);
 
         return CreatedAtAction(nameof(Get), new { id = client.Id },
-            new CreateApiClientResponse(client.Id, client.Name, client.ClientId, plaintextSecret));
+            new CreateApiClientResponse(client.Id, client.Name, client.ClientId, plaintextSecret, client.RateLimitPerMinute));
+    }
+
+    /// <summary>Adjusts a partner's rate limit (§11.1) — takes effect on their next token request, since the limit is embedded as a claim, not looked up per API call.</summary>
+    [HttpPut("{id:guid}/rate-limit")]
+    [Authorize(Policy = "integration.apiclient.manage")]
+    public async Task<IActionResult> UpdateRateLimit(Guid id, UpdateRateLimitRequest request, CancellationToken ct)
+    {
+        if (request.RateLimitPerMinute <= 0)
+            return BadRequest("RateLimitPerMinute must be positive.");
+
+        var client = await _db.ApiClients.FirstOrDefaultAsync(c => c.Id == id, ct);
+        if (client is null) return NotFound();
+
+        client.RateLimitPerMinute = request.RateLimitPerMinute;
+        await _db.SaveChangesAsync(ct);
+        return NoContent();
     }
 
     /// <summary>Adds a new active secret without revoking existing ones — an overlap window for rotating credentials without a hard cutover.</summary>

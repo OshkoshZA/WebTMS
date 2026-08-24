@@ -19,6 +19,12 @@ public record IssuedToken(string AccessToken, DateTimeOffset ExpiresAt);
 /// </summary>
 public class JwtTokenService
 {
+    // Interactive users don't have a per-account configured limit (only ApiClients
+    // do, §11.1) — this is a single shared baseline, generous relative to a typical
+    // machine client's default, since a human driving the UI naturally makes many
+    // more small requests than one integration batch job does.
+    private const int DefaultUserRateLimitPerMinute = 300;
+
     private readonly IConfiguration _configuration;
 
     public JwtTokenService(IConfiguration configuration)
@@ -37,7 +43,8 @@ public class JwtTokenService
             new(ClaimTypes.NameIdentifier, user.Id.ToString()),
             new(ClaimTypes.Email, user.Email ?? string.Empty),
             new("tenant_id", user.TenantId.ToString()),
-            new("company_id", companyId.ToString())
+            new("company_id", companyId.ToString()),
+            new("rate_limit", DefaultUserRateLimitPerMinute.ToString())
         };
         claims.AddRange(roleNames.Select(r => new Claim(ClaimTypes.Role, r)));
         // One claim per granted function (§07) — FunctionAuthorizationHandler checks these,
@@ -54,7 +61,9 @@ public class JwtTokenService
     /// resolves to. TenantContextMiddleware reads "client_id" the same way it reads
     /// a user's NameIdentifier, into ICurrentUserAccessor.ApiClientId — so a write
     /// made under this token is attributed in the audit trail (§12) to the
-    /// integration partner, not to a (non-existent) user.
+    /// integration partner, not to a (non-existent) user. The client's own
+    /// RateLimitPerMinute travels with it as a claim too, so the rate limiter
+    /// (Program.cs) never needs a database round-trip to size the limit.
     /// </summary>
     public IssuedToken IssueClientCredentialsToken(ApiClient client, IEnumerable<string> functionCodes)
     {
@@ -62,7 +71,8 @@ public class JwtTokenService
         {
             new("client_id", client.ClientId),
             new("tenant_id", client.TenantId.ToString()),
-            new("company_id", client.CompanyId.ToString())
+            new("company_id", client.CompanyId.ToString()),
+            new("rate_limit", client.RateLimitPerMinute.ToString())
         };
         claims.AddRange(functionCodes.Distinct().Select(f => new Claim("function", f)));
 

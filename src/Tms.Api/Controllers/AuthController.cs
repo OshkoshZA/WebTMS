@@ -1,5 +1,6 @@
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.EntityFrameworkCore;
 using Tms.Api.Auth;
 using Tms.Infrastructure;
@@ -51,6 +52,7 @@ public class AuthController : ControllerBase
     }
 
     [HttpPost("login")]
+    [EnableRateLimiting("auth")]
     public async Task<ActionResult<LoginResponse>> Login(LoginRequest request, CancellationToken ct)
     {
         var user = await _userManager.FindByEmailAsync(request.Email);
@@ -98,6 +100,7 @@ public class AuthController : ControllerBase
     /// rotation family, forcing a fresh login.
     /// </summary>
     [HttpPost("refresh")]
+    [EnableRateLimiting("auth")]
     public async Task<ActionResult<RefreshResponse>> Refresh(RefreshRequest request, CancellationToken ct)
     {
         var existing = await _refreshTokens.FindByPlaintextAsync(request.RefreshToken, ct);
@@ -155,6 +158,7 @@ public class AuthController : ControllerBase
     /// </summary>
     [HttpPost("token")]
     [Consumes("application/x-www-form-urlencoded")]
+    [EnableRateLimiting("auth")]
     public async Task<IActionResult> Token(
         [FromForm(Name = "grant_type")] string? grantType,
         [FromForm(Name = "client_id")] string? clientId,
