@@ -99,6 +99,21 @@ public class TmsDbContext : IdentityDbContext<ApplicationUser, ApplicationRole, 
             .HasForeignKey(cl => cl.LoadLegId);
 
         ApplyTenancyScopeFilters(modelBuilder);
+
+        // ApplicationUser/ApplicationRole carry a TenantId but extend IdentityUser<Guid>/
+        // IdentityRole<Guid>, not TenantScopedEntity, so the reflection-based pass above
+        // never reaches them — they need their own filter, applied here by hand. Unlike
+        // every other tenant-scoped filter, this one also bypasses when CurrentTenantId
+        // is itself null: Login/Refresh query these tables before any tenant is known
+        // (that's exactly what they're resolving), and the same is true of the
+        // Development seeder running outside any HTTP request. Once a tenant *is*
+        // resolved (any authenticated request), the filter applies as normal — e.g. it
+        // stops ApiClientsController.Create from wiring an ApiClientRole to a RoleId
+        // that belongs to a different tenant.
+        modelBuilder.Entity<ApplicationUser>()
+            .HasQueryFilter(u => IsPlatformSupportBypass || CurrentTenantId == null || u.TenantId == CurrentTenantId);
+        modelBuilder.Entity<ApplicationRole>()
+            .HasQueryFilter(r => IsPlatformSupportBypass || CurrentTenantId == null || r.TenantId == CurrentTenantId);
     }
 
     /// <summary>
