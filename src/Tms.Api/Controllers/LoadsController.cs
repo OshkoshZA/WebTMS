@@ -139,6 +139,8 @@ public class LoadsController : ControllerBase
 
         var load = await _db.Loads.Include(l => l.Legs).FirstOrDefaultAsync(l => l.Id == id, ct);
         if (load is null) return NotFound();
+        if (load.Status == LoadStatus.OnHold)
+            return Conflict("Load is On Hold; release it before adding further legs.");
 
         if (!await _db.Locations.AnyAsync(l => l.Id == request.OriginLocationId, ct))
             return NotFound($"Location {request.OriginLocationId} (origin) was not found.");
@@ -188,6 +190,8 @@ public class LoadsController : ControllerBase
         if (leg is null) return NotFound($"Leg {legId} was not found on load {id}.");
         if (leg.Status != LoadLegStatus.Planned)
             return Conflict($"Leg is {leg.Status}; only a Planned leg can be allocated.");
+        if (load.Status == LoadStatus.OnHold)
+            return Conflict("Load is On Hold; release it before allocating further legs.");
         if (!await _db.Vehicles.AnyAsync(v => v.Id == request.VehicleId, ct))
             return NotFound($"Vehicle {request.VehicleId} was not found.");
         if (!await _db.Drivers.AnyAsync(d => d.Id == request.DriverId, ct))
