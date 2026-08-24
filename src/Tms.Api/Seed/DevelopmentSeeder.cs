@@ -159,6 +159,8 @@ public static class DevelopmentSeeder
         {
             ("client.creditlimit.override",
              "Push a load or commodity line through over a client's credit limit, with a logged reason (§5.4)."),
+            ("client.master.manage",
+             "Create, update, and deactivate Client master data, including its credit limit and payment terms (§11.2)."),
             ("integration.apiclient.manage",
              "Create, rotate secrets for, and revoke system-to-system API clients (§11.1).")
         };

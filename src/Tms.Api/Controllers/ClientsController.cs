@@ -51,6 +51,7 @@ public class ClientsController : ControllerBase
     }
 
     [HttpPost]
+    [Authorize(Policy = "client.master.manage")]
     public async Task<ActionResult<Client>> Create(CreateClientRequest request, CancellationToken ct)
     {
         if (_tenantContext.TenantId is null || _tenantContext.CompanyId is null)
@@ -74,6 +75,7 @@ public class ClientsController : ControllerBase
     }
 
     [HttpPut("{id:guid}")]
+    [Authorize(Policy = "client.master.manage")]
     public async Task<IActionResult> Update(Guid id, UpdateClientRequest request, CancellationToken ct)
     {
         var client = await _db.Clients.FirstOrDefaultAsync(c => c.Id == id, ct);
@@ -101,6 +103,7 @@ public class ClientsController : ControllerBase
     }
 
     [HttpPost("{id:guid}/deactivate")]
+    [Authorize(Policy = "client.master.manage")]
     public async Task<IActionResult> Deactivate(Guid id, CancellationToken ct)
     {
         var client = await _db.Clients.FirstOrDefaultAsync(c => c.Id == id, ct);
