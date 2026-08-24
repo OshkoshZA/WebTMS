@@ -138,6 +138,10 @@ public class LoadsController : ControllerBase
             return NotFound($"Location {request.DestinationLocationId} (destination) was not found.");
         if (!await _db.CostCentres.AnyAsync(c => c.Id == request.CostCentreId, ct))
             return NotFound($"Cost centre {request.CostCentreId} was not found.");
+        if (request.VehicleId is Guid vehicleId && !await _db.Vehicles.AnyAsync(v => v.Id == vehicleId, ct))
+            return NotFound($"Vehicle {vehicleId} was not found.");
+        if (request.DriverId is Guid driverId && !await _db.Drivers.AnyAsync(d => d.Id == driverId, ct))
+            return NotFound($"Driver {driverId} was not found.");
 
         var leg = new LoadLeg
         {
@@ -176,6 +180,10 @@ public class LoadsController : ControllerBase
         if (leg is null) return NotFound($"Leg {legId} was not found on load {id}.");
         if (leg.Status != LoadLegStatus.Planned)
             return Conflict($"Leg is {leg.Status}; only a Planned leg can be allocated.");
+        if (!await _db.Vehicles.AnyAsync(v => v.Id == request.VehicleId, ct))
+            return NotFound($"Vehicle {request.VehicleId} was not found.");
+        if (!await _db.Drivers.AnyAsync(d => d.Id == request.DriverId, ct))
+            return NotFound($"Driver {request.DriverId} was not found.");
 
         leg.VehicleId = request.VehicleId;
         leg.DriverId = request.DriverId;
