@@ -9,6 +9,12 @@ public enum VehicleType
     Rigid
 }
 
+public enum VehicleStatus
+{
+    Active,
+    Deactivated
+}
+
 /// <summary>Company-owned truck or trailer (docs/architecture.html §5.1).</summary>
 public class Vehicle : CompanyScopedEntity
 {
@@ -19,4 +25,5 @@ public class Vehicle : CompanyScopedEntity
     public string? Model { get; set; }
     public DateOnly? LicenceExpiry { get; set; }
     public DateOnly? VehicleTestExpiry { get; set; }
+    public VehicleStatus Status { get; set; } = VehicleStatus.Active;
 }

@@ -7,7 +7,23 @@ using Tms.Shared;
 
 namespace Tms.Api.Controllers;
 
-public record CreateVehicleRequest(string FleetNo, string Registration, VehicleType Type, string? Make, string? Model);
+public record CreateVehicleRequest(
+    string FleetNo,
+    string Registration,
+    VehicleType Type,
+    string? Make,
+    string? Model,
+    DateOnly? LicenceExpiry,
+    DateOnly? VehicleTestExpiry);
+
+public record UpdateVehicleRequest(
+    string FleetNo,
+    string Registration,
+    VehicleType Type,
+    string? Make,
+    string? Model,
+    DateOnly? LicenceExpiry,
+    DateOnly? VehicleTestExpiry);
 
 /// <summary>Vehicle master data (docs/architecture.html §5.1) — follows the standard CRUD convention (§11.5).</summary>
 [ApiController]
@@ -49,12 +65,43 @@ public class VehiclesController : ControllerBase
             Registration = request.Registration,
             Type = request.Type,
             Make = request.Make,
-            Model = request.Model
+            Model = request.Model,
+            LicenceExpiry = request.LicenceExpiry,
+            VehicleTestExpiry = request.VehicleTestExpiry
         };
 
         _db.Vehicles.Add(vehicle);
         await _db.SaveChangesAsync(ct);
 
         return CreatedAtAction(nameof(Get), new { id = vehicle.Id }, vehicle);
+    }
+
+    [HttpPut("{id:guid}")]
+    public async Task<IActionResult> Update(Guid id, UpdateVehicleRequest request, CancellationToken ct)
+    {
+        var vehicle = await _db.Vehicles.FirstOrDefaultAsync(v => v.Id == id, ct);
+        if (vehicle is null) return NotFound();
+
+        vehicle.FleetNo = request.FleetNo;
+        vehicle.Registration = request.Registration;
+        vehicle.Type = request.Type;
+        vehicle.Make = request.Make;
+        vehicle.Model = request.Model;
+        vehicle.LicenceExpiry = request.LicenceExpiry;
+        vehicle.VehicleTestExpiry = request.VehicleTestExpiry;
+
+        await _db.SaveChangesAsync(ct);
+        return NoContent();
+    }
+
+    [HttpPost("{id:guid}/deactivate")]
+    public async Task<IActionResult> Deactivate(Guid id, CancellationToken ct)
+    {
+        var vehicle = await _db.Vehicles.FirstOrDefaultAsync(v => v.Id == id, ct);
+        if (vehicle is null) return NotFound();
+
+        vehicle.Status = VehicleStatus.Deactivated; // never a hard delete — §11.5
+        await _db.SaveChangesAsync(ct);
+        return NoContent();
     }
 }
