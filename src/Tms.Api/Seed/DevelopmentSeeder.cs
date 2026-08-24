@@ -8,14 +8,23 @@ namespace Tms.Api.Seed;
 
 /// <summary>
 /// Development-only bootstrap data — a Tenant, Company, one admin user with a
-/// Company-scoped role (docs/architecture.html §04, §07), and the Function catalog
-/// (§07) — so a freshly-created database has something to log in as. Never runs
-/// outside the Development environment.
+/// Company-scoped role (docs/architecture.html §04, §07), the starter roles, and
+/// the Function catalog (§07) — so a freshly-created database has something to
+/// log in as. Never runs outside the Development environment.
+///
+/// Only the Tenant/Company/reference-data/admin-user step is genuinely one-time;
+/// starter roles and the Function catalog are re-synced on every startup, so a role
+/// or function added after the database already exists still gets created (and, for
+/// functions, granted) without a manual step against an already-seeded database —
+/// exactly the situation this file used to get wrong before both were split out.
 /// </summary>
 public static class DevelopmentSeeder
 {
     public const string AdminEmail = "admin@demo.local";
     public const string AdminPassword = "DemoAdmin#2026";
+
+    private const string AdminRoleName = "Admin";
+    private const string IntegrationServiceRoleName = "Integration Service";
 
     public static async Task SeedAsync(IServiceProvider services)
     {
@@ -24,19 +33,27 @@ public static class DevelopmentSeeder
         var roleManager = scope.ServiceProvider.GetRequiredService<RoleManager<ApplicationRole>>();
         var logger = scope.ServiceProvider.GetRequiredService<ILogger<object>>();
 
-        if (!await db.Tenants.IgnoreQueryFilters().AnyAsync())
+        var tenant = await db.Tenants.IgnoreQueryFilters().FirstOrDefaultAsync();
+        var isFirstRun = tenant is null;
+
+        Company? company = null;
+        if (isFirstRun)
         {
-            await SeedTenantCompanyAndAdminAsync(scope.ServiceProvider, db, logger);
+            (tenant, company) = await SeedTenantAndCompanyAsync(db);
+            logger.LogInformation("Seeded development Tenant '{Tenant}' and Company '{Company}'.", tenant.Name, company.LegalName);
         }
 
+        await EnsureStarterRolesAsync(roleManager, tenant!.Id, logger);
         await EnsureFunctionCatalogAsync(db, roleManager, logger);
+
+        if (isFirstRun)
+        {
+            await SeedAdminUserAsync(scope.ServiceProvider, db, tenant!, company!, roleManager, logger);
+        }
     }
 
-    private static async Task SeedTenantCompanyAndAdminAsync(IServiceProvider sp, TmsDbContext db, ILogger logger)
+    private static async Task<(Tenant Tenant, Company Company)> SeedTenantAndCompanyAsync(TmsDbContext db)
     {
-        var userManager = sp.GetRequiredService<UserManager<ApplicationUser>>();
-        var roleManager = sp.GetRequiredService<RoleManager<ApplicationRole>>();
-
         var country = new Country { Code = "ZA", Name = "South Africa" };
         var currency = new Currency { Code = "ZAR", Name = "South African Rand", Symbol = "R" };
         db.Countries.Add(country);
@@ -74,13 +91,16 @@ public static class DevelopmentSeeder
         db.Companies.Add(company);
 
         await db.SaveChangesAsync();
+        return (tenant, company);
+    }
 
-        if (await roleManager.FindByNameAsync("Admin") is null)
-        {
-            await roleManager.CreateAsync(new ApplicationRole { Name = "Admin", TenantId = tenant.Id });
-        }
-        var adminRole = await roleManager.FindByNameAsync("Admin")
-            ?? throw new InvalidOperationException("Admin role was not created.");
+    private static async Task SeedAdminUserAsync(
+        IServiceProvider sp, TmsDbContext db, Tenant tenant, Company company, RoleManager<ApplicationRole> roleManager, ILogger logger)
+    {
+        var userManager = sp.GetRequiredService<UserManager<ApplicationUser>>();
+
+        var adminRole = await roleManager.FindByNameAsync(AdminRoleName)
+            ?? throw new InvalidOperationException("Admin role was not created by EnsureStarterRolesAsync.");
 
         var adminUser = new ApplicationUser
         {
@@ -107,26 +127,43 @@ public static class DevelopmentSeeder
 
         await db.SaveChangesAsync();
 
-        logger.LogInformation(
-            "Seeded development data — Tenant '{Tenant}', Company '{Company}'. Log in with {Email} / {Password}",
-            tenant.Name, company.LegalName, AdminEmail, AdminPassword);
+        logger.LogInformation("Seeded admin user. Log in with {Email} / {Password}", AdminEmail, AdminPassword);
+    }
+
+    /// <summary>
+    /// Ensures the demo tenant's starter roles (§07) exist — Admin for interactive
+    /// staff, Integration Service for machine clients (§11.1) — without granting
+    /// either any functions by default. Runs every startup.
+    /// </summary>
+    private static async Task EnsureStarterRolesAsync(RoleManager<ApplicationRole> roleManager, Guid tenantId, ILogger logger)
+    {
+        foreach (var roleName in new[] { AdminRoleName, IntegrationServiceRoleName })
+        {
+            if (await roleManager.FindByNameAsync(roleName) is null)
+            {
+                await roleManager.CreateAsync(new ApplicationRole { Name = roleName, TenantId = tenantId });
+                logger.LogInformation("Created starter role '{Role}'.", roleName);
+            }
+        }
     }
 
     /// <summary>
     /// Registers the known Function catalog (§07: "new functions are registered by
     /// the API as new endpoints ship") and grants the demo Admin role whatever it
-    /// needs. Runs every startup, not just on first seed, so a function added after
-    /// the database already exists still gets created and granted with no manual step.
+    /// needs. Runs every startup, so a function added after the database already
+    /// exists still gets created and granted with no manual step.
     /// </summary>
     private static async Task EnsureFunctionCatalogAsync(TmsDbContext db, RoleManager<ApplicationRole> roleManager, ILogger logger)
     {
         var knownFunctions = new[]
         {
             ("client.creditlimit.override",
-             "Push a load or commodity line through over a client's credit limit, with a logged reason (§5.4).")
+             "Push a load or commodity line through over a client's credit limit, with a logged reason (§5.4)."),
+            ("integration.apiclient.manage",
+             "Create, rotate secrets for, and revoke system-to-system API clients (§11.1).")
         };
 
-        var adminRole = await roleManager.FindByNameAsync("Admin");
+        var adminRole = await roleManager.FindByNameAsync(AdminRoleName);
 
         foreach (var (code, description) in knownFunctions)
         {
@@ -146,7 +183,7 @@ public static class DevelopmentSeeder
             {
                 db.RoleFunctions.Add(new RoleFunction { RoleId = adminRole.Id, FunctionId = function.Id });
                 await db.SaveChangesAsync();
-                logger.LogInformation("Granted function '{Function}' to role 'Admin'", code);
+                logger.LogInformation("Granted function '{Function}' to role '{Role}'", code, AdminRoleName);
             }
         }
     }

@@ -82,4 +82,63 @@ public class AuthController : ControllerBase
         return Ok(new LoginResponse(
             token.AccessToken, token.ExpiresAt, user.TenantId, assignment.CompanyId, roleNames, functionCodes));
     }
+
+    /// <summary>
+    /// OAuth2 client-credentials grant (docs/architecture.html §11.1) — the
+    /// system-to-system counterpart to <see cref="Login"/>. Standard RFC 6749 §4.4
+    /// shape: form-encoded request, "access_token"/"token_type"/"expires_in" response,
+    /// an "error" body on failure — so any off-the-shelf OAuth2 client library can
+    /// call this without knowing anything TMS-specific.
+    /// </summary>
+    [HttpPost("token")]
+    [Consumes("application/x-www-form-urlencoded")]
+    public async Task<IActionResult> Token(
+        [FromForm(Name = "grant_type")] string? grantType,
+        [FromForm(Name = "client_id")] string? clientId,
+        [FromForm(Name = "client_secret")] string? clientSecret,
+        CancellationToken ct)
+    {
+        if (grantType != "client_credentials")
+            return BadRequest(new { error = "unsupported_grant_type" });
+        if (string.IsNullOrWhiteSpace(clientId) || string.IsNullOrWhiteSpace(clientSecret))
+            return BadRequest(new { error = "invalid_request" });
+
+        // No tenant is known yet at this point — that's exactly what ClientId
+        // resolves — so this is one of the few places IgnoreQueryFilters (§4.1) is
+        // the correct call rather than a bypass to be suspicious of.
+        var client = await _db.Set<ApiClient>().IgnoreQueryFilters()
+            .FirstOrDefaultAsync(c => c.ClientId == clientId, ct);
+        if (client is null || client.Status != ApiClientStatus.Active)
+            return Unauthorized(new { error = "invalid_client" });
+
+        var secrets = await _db.Set<ApiClientSecret>().IgnoreQueryFilters()
+            .Where(s => s.ApiClientId == client.Id && s.RevokedAt == null)
+            .ToListAsync(ct);
+
+        var hasher = new PasswordHasher<ApiClient>();
+        var verified = secrets.Any(s =>
+            hasher.VerifyHashedPassword(client, s.SecretHash, clientSecret) != PasswordVerificationResult.Failed);
+        if (!verified)
+            return Unauthorized(new { error = "invalid_client" });
+
+        var roleIds = await _db.Set<ApiClientRole>().IgnoreQueryFilters()
+            .Where(r => r.ApiClientId == client.Id)
+            .Select(r => r.RoleId)
+            .ToListAsync(ct);
+
+        var functionCodes = await _db.RoleFunctions
+            .Where(rf => roleIds.Contains(rf.RoleId))
+            .Join(_db.Functions, rf => rf.FunctionId, f => f.Id, (rf, f) => f.Code)
+            .Distinct()
+            .ToListAsync(ct);
+
+        var token = _tokenService.IssueClientCredentialsToken(client, functionCodes);
+
+        return Ok(new
+        {
+            access_token = token.AccessToken,
+            token_type = "Bearer",
+            expires_in = (int)(token.ExpiresAt - DateTimeOffset.UtcNow).TotalSeconds
+        });
+    }
 }

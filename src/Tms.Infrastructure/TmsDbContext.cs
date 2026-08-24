@@ -47,6 +47,9 @@ public class TmsDbContext : IdentityDbContext<ApplicationUser, ApplicationRole, 
     public DbSet<Company> Companies => Set<Company>();
     public DbSet<RoleFunction> RoleFunctions => Set<RoleFunction>();
     public DbSet<UserCompanyRole> UserCompanyRoles => Set<UserCompanyRole>();
+    public DbSet<ApiClient> ApiClients => Set<ApiClient>();
+    public DbSet<ApiClientSecret> ApiClientSecrets => Set<ApiClientSecret>();
+    public DbSet<ApiClientRole> ApiClientRoles => Set<ApiClientRole>();
 
     // Fleet (§5.1)
     public DbSet<Location> Locations => Set<Location>();
