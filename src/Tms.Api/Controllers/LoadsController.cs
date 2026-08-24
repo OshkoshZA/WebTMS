@@ -402,6 +402,10 @@ public class LoadsController : ControllerBase
     /// function claim (§07) — resolved from their role at login, checked here via
     /// the same policy mechanism any endpoint could use — and is written to the
     /// audit trail either way.
+    ///
+    /// KNOWN LIMITATION: this check is not atomic with the SaveChangesAsync the caller
+    /// runs afterward — see CreditExposureService's doc comment and
+    /// docs/architecture.html §5.4 for the concurrent-write race this leaves open.
     /// </summary>
     private async Task<ActionResult?> CheckCreditAsync(
         Tms.Modules.Loads.Client client,

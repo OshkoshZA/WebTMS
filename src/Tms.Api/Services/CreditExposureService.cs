@@ -22,6 +22,14 @@ public record CreditStatus(
 /// Invoiced yet, computed directly from CommodityLine sell RateLines, which already
 /// exist in Phase 1. Swap in the real AR figure here — and nowhere else — once
 /// Billing lands; every caller of this service stays correct automatically.
+///
+/// KNOWN LIMITATION (docs/architecture.html §5.4): this reads exposure with no lock
+/// and no elevated isolation, so it is not atomic with the SaveChangesAsync the caller
+/// runs afterward. Two genuinely concurrent writes against the same client can each
+/// read exposure before the other commits and both pass the hard-stop check, together
+/// exceeding CreditLimit. Accepted as a Phase 1 gap — closing it means row-locking or
+/// a serializable transaction around the check-and-save, at the cost of added lock
+/// contention on every load/commodity-line write.
 /// </summary>
 public class CreditExposureService
 {
