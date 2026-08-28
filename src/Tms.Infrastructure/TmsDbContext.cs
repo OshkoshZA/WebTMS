@@ -67,6 +67,7 @@ public class TmsDbContext : IdentityDbContext<ApplicationUser, ApplicationRole, 
     public DbSet<LoadLeg> LoadLegs => Set<LoadLeg>();
     public DbSet<LoadStatusHistory> LoadStatusHistories => Set<LoadStatusHistory>();
     public DbSet<CommodityLine> CommodityLines => Set<CommodityLine>();
+    public DbSet<LoadConfirmation> LoadConfirmations => Set<LoadConfirmation>();
 
     // Rating (§08)
     public DbSet<RateLine> RateLines => Set<RateLine>();

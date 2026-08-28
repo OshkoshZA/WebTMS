@@ -192,6 +192,7 @@ public class LoadsController : ControllerBase
         load.Legs.Add(leg);
 
         await RecomputeLoadStatusAsync(load, ct);
+        await EnsureLoadConfirmationAsync(leg, ct);
         await _db.SaveChangesAsync(ct);
 
         return CreatedAtAction(nameof(Get), new { id = load.Id }, leg);
@@ -236,6 +237,7 @@ public class LoadsController : ControllerBase
         leg.Status = LoadLegStatus.Allocated;
 
         await RecomputeLoadStatusAsync(load, ct);
+        await EnsureLoadConfirmationAsync(leg, ct);
         await _db.SaveChangesAsync(ct);
         return NoContent();
     }
@@ -387,6 +389,28 @@ public class LoadsController : ControllerBase
         await _db.SaveChangesAsync(ct);
 
         return CreatedAtAction(nameof(Get), new { id }, commodityLine);
+    }
+
+    /// <summary>
+    /// Issues a LoadConfirmation the moment a Subcontracted leg reaches Allocated
+    /// (§8.2) — never created directly, and never twice for the same leg. Sequential
+    /// DocumentNumber per company carries the same accepted concurrency caveat as
+    /// InvoicesController's NextInvoiceNumberAsync.
+    /// </summary>
+    private async Task EnsureLoadConfirmationAsync(LoadLeg leg, CancellationToken ct)
+    {
+        if (leg.ExecutionType != LoadLegExecutionType.Subcontracted || leg.SubcontractorId is null) return;
+        if (await _db.Set<LoadConfirmation>().AnyAsync(lc => lc.LoadLegId == leg.Id, ct)) return;
+
+        var count = await _db.Set<LoadConfirmation>().CountAsync(lc => lc.CompanyId == leg.CompanyId, ct);
+        _db.Set<LoadConfirmation>().Add(new LoadConfirmation
+        {
+            TenantId = leg.TenantId,
+            CompanyId = leg.CompanyId,
+            LoadLegId = leg.Id,
+            SubcontractorId = leg.SubcontractorId.Value,
+            DocumentNumber = $"LC{count + 1:D6}"
+        });
     }
 
     /// <summary>

@@ -25,8 +25,9 @@ public enum LoadLegStatus
 /// <summary>
 /// One movement within a load (docs/architecture.html §5.1) — a load may have several,
 /// e.g. collection → hub → final mile. Carries one-or-more <see cref="CommodityLine"/>s
-/// rather than a single price itself (§5.5); SubcontractorId is a bare id for now —
-/// the Subcontractor entity itself lands with subcontracting in Phase 2 (§10.2).
+/// rather than a single price itself (§5.5). SubcontractorId is set by
+/// LoadsController.AddLeg/AllocateLeg the moment a Subcontracted leg reaches Allocated,
+/// which is also the trigger for a <see cref="LoadConfirmation"/> (§8.2).
 /// </summary>
 public class LoadLeg : CompanyScopedEntity
 {
@@ -39,7 +40,7 @@ public class LoadLeg : CompanyScopedEntity
     public Guid CostCentreId { get; set; }
     public Guid? VehicleId { get; set; }
     public Guid? DriverId { get; set; }
-    public Guid? SubcontractorId { get; set; } // Phase 2 — see §10.2
+    public Guid? SubcontractorId { get; set; }
 
     public List<CommodityLine> CommodityLines { get; set; } = new();
 }
