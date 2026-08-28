@@ -4,6 +4,7 @@ using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Tms.Infrastructure;
+using Tms.Modules.Audit;
 using Tms.Modules.Identity;
 using Tms.Shared;
 
@@ -34,12 +35,15 @@ public class UsersController : ControllerBase
     private readonly TmsDbContext _db;
     private readonly UserManager<ApplicationUser> _userManager;
     private readonly ITenantContext _tenantContext;
+    private readonly ICurrentUserAccessor _currentUser;
 
-    public UsersController(TmsDbContext db, UserManager<ApplicationUser> userManager, ITenantContext tenantContext)
+    public UsersController(
+        TmsDbContext db, UserManager<ApplicationUser> userManager, ITenantContext tenantContext, ICurrentUserAccessor currentUser)
     {
         _db = db;
         _userManager = userManager;
         _tenantContext = tenantContext;
+        _currentUser = currentUser;
     }
 
     [HttpGet]
@@ -130,6 +134,13 @@ public class UsersController : ControllerBase
     [Authorize(Policy = "identity.user.manage")]
     public async Task<IActionResult> Deactivate(Guid id, CancellationToken ct)
     {
+        // Deactivating requires identity.user.manage, which the target account would
+        // lose the moment this succeeds — so a caller deactivating themselves could
+        // strand the tenant with no one left who can call Reactivate. Have another
+        // admin do it instead.
+        if (id == _currentUser.UserId)
+            return Conflict("You cannot deactivate your own account — have another user with identity.user.manage do it.");
+
         var user = await _db.Users.FirstOrDefaultAsync(u => u.Id == id, ct);
         if (user is null) return NotFound();
 
