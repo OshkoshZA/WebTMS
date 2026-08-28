@@ -166,7 +166,11 @@ public static class DevelopmentSeeder
             ("identity.user.manage",
              "Create, update, deactivate/reactivate internal users, and manage their company/role assignments (§07)."),
             ("identity.role.manage",
-             "Create roles and grant/revoke the functions they carry (§07) — distinct from identity.user.manage, since defining what a role can do is more sensitive than assigning an existing one.")
+             "Create roles and grant/revoke the functions they carry (§07) — distinct from identity.user.manage, since defining what a role can do is more sensitive than assigning an existing one."),
+            ("finance.calendar.manage",
+             "Create a Company's FinancialYears and their periods (§10.3)."),
+            ("finance.period.close",
+             "Close a FinancialPeriod, opening the next one and rolling every Client's debtors aging forward (§10.3) — one-directional, like every other approval boundary in this design.")
         };
 
         var adminRole = await roleManager.FindByNameAsync(AdminRoleName);

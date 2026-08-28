@@ -2,6 +2,7 @@ using System.Reflection;
 using Microsoft.AspNetCore.Identity.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore;
 using Tms.Modules.Audit;
+using Tms.Modules.Billing;
 using Tms.Modules.Fleet;
 using Tms.Modules.Identity;
 using Tms.Modules.Loads;
@@ -69,6 +70,11 @@ public class TmsDbContext : IdentityDbContext<ApplicationUser, ApplicationRole, 
     // Rating (§08)
     public DbSet<RateLine> RateLines => Set<RateLine>();
 
+    // Billing (§10.3 — financial calendar; §10.1/§10.2 land in later phases)
+    public DbSet<FinancialYear> FinancialYears => Set<FinancialYear>();
+    public DbSet<FinancialPeriod> FinancialPeriods => Set<FinancialPeriod>();
+    public DbSet<DebtorsAgingSnapshot> DebtorsAgingSnapshots => Set<DebtorsAgingSnapshot>();
+
     // Privacy (§14)
     public DbSet<RetentionPolicy> RetentionPolicies => Set<RetentionPolicy>();
 
@@ -97,6 +103,18 @@ public class TmsDbContext : IdentityDbContext<ApplicationUser, ApplicationRole, 
             .HasMany(leg => leg.CommodityLines)
             .WithOne()
             .HasForeignKey(cl => cl.LoadLegId);
+
+        modelBuilder.Entity<FinancialYear>()
+            .HasMany(y => y.Periods)
+            .WithOne()
+            .HasForeignKey(p => p.FinancialYearId);
+
+        modelBuilder.Entity<DebtorsAgingSnapshot>().Property(s => s.CurrentAmount).HasPrecision(18, 2);
+        modelBuilder.Entity<DebtorsAgingSnapshot>().Property(s => s.Days30).HasPrecision(18, 2);
+        modelBuilder.Entity<DebtorsAgingSnapshot>().Property(s => s.Days60).HasPrecision(18, 2);
+        modelBuilder.Entity<DebtorsAgingSnapshot>().Property(s => s.Days90).HasPrecision(18, 2);
+        modelBuilder.Entity<DebtorsAgingSnapshot>().Property(s => s.Days90Plus).HasPrecision(18, 2);
+        modelBuilder.Entity<DebtorsAgingSnapshot>().Property(s => s.TotalOutstanding).HasPrecision(18, 2);
 
         ApplyTenancyScopeFilters(modelBuilder);
 

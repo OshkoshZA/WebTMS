@@ -23,6 +23,7 @@
     <ProjectReference Include="..\Tms.Shared\Tms.Shared.csproj" />
     <ProjectReference Include="..\Tms.Modules.Rating\Tms.Modules.Rating.csproj" />
     <ProjectReference Include="..\Tms.Modules.Audit\Tms.Modules.Audit.csproj" />
+    <ProjectReference Include="..\Tms.Modules.Billing\Tms.Modules.Billing.csproj" />
   </ItemGroup>
 
 </Project>

@@ -1,7 +1,7 @@
 // Tms.Modules.Billing
 //
-// Not yet implemented. Scaffolded as an empty module so the solution's project
-// structure matches docs/architecture.html §18 from day one, even though its
-// entities land in a later phase (see docs/architecture.html §19 Delivery Roadmap).
+// §10.3 (financial calendar) is implemented — see FinancialCalendar.cs. The rest of
+// §10 lands in later phases (docs/architecture.html §19 Delivery Roadmap):
 //
-// §10: Invoice, InvoiceLine, CreditNote, CreditNoteLine, SubcontractorAccrual, SupplierInvoice, SubcontractorExpense, FinancialYear, FinancialPeriod, DebtorsAgingSnapshot — Phase 2/3
+// §10.1: Invoice, InvoiceLine, CreditNote, CreditNoteLine — sell side
+// §10.2: SubcontractorAccrual, SupplierInvoice, SubcontractorExpense — buy side
