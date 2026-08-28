@@ -93,7 +93,22 @@ public class UsersController : ControllerBase
             DisplayName = request.DisplayName
         };
 
-        var createResult = await _userManager.CreateAsync(user, request.Password);
+        IdentityResult createResult;
+        try
+        {
+            createResult = await _userManager.CreateAsync(user, request.Password);
+        }
+        catch (DbUpdateException)
+        {
+            // UserManager's own duplicate-email check runs against the tenant-scoped
+            // query filter and would normally have already caught this — this only
+            // fires if two requests for the same email in the same Tenant race each
+            // other past that check. The composite (TenantId, NormalizedUserName)
+            // unique index (§07) still catches it at the database; this just turns
+            // that into a clean response instead of a raw 500 with a stack trace.
+            return Conflict("A user with that email already exists.");
+        }
+
         if (!createResult.Succeeded)
         {
             return BadRequest(new { errors = createResult.Errors.Select(e => e.Description) });

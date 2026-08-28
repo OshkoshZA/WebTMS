@@ -69,7 +69,23 @@ public class RolesController : ControllerBase
             return Unauthorized("Request is missing a resolved Tenant context.");
 
         var role = new ApplicationRole { Name = request.Name, TenantId = _tenantContext.TenantId.Value };
-        var createResult = await _roleManager.CreateAsync(role);
+
+        IdentityResult createResult;
+        try
+        {
+            createResult = await _roleManager.CreateAsync(role);
+        }
+        catch (DbUpdateException)
+        {
+            // RoleManager's own duplicate-name check runs against the tenant-scoped
+            // query filter and would normally have already caught this — this only
+            // fires if two requests for the same name in the same Tenant race each
+            // other past that check. The composite (TenantId, NormalizedName) unique
+            // index (§07) still catches it at the database; this just turns that into
+            // a clean response instead of a raw 500 with a stack trace.
+            return Conflict("A role with that name already exists.");
+        }
+
         if (!createResult.Succeeded)
         {
             return BadRequest(new { errors = createResult.Errors.Select(e => e.Description) });

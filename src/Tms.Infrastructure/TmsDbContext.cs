@@ -114,6 +114,32 @@ public class TmsDbContext : IdentityDbContext<ApplicationUser, ApplicationRole, 
             .HasQueryFilter(u => IsPlatformSupportBypass || CurrentTenantId == null || u.TenantId == CurrentTenantId);
         modelBuilder.Entity<ApplicationRole>()
             .HasQueryFilter(r => IsPlatformSupportBypass || CurrentTenantId == null || r.TenantId == CurrentTenantId);
+
+        // Identity's default RoleNameIndex/UserNameIndex are single-column unique
+        // constraints spanning every row in the table — correct for a single-tenant
+        // app, wrong here: they made a role/username collide across two completely
+        // different Tenants (confirmed live — a second tenant's "Regional Manager"
+        // role blocked the first tenant from ever using that name, crashing
+        // RolesController.Create with an unhandled 500). Free up each original name
+        // and reuse it for a composite (TenantId, NormalizedX) unique index instead,
+        // so uniqueness is enforced per Tenant, matching every query filter above.
+        modelBuilder.Entity<ApplicationRole>(b =>
+        {
+            b.HasIndex(r => r.NormalizedName).IsUnique(false).HasDatabaseName("RoleNormalizedNameIndex");
+            b.HasIndex(r => new { r.TenantId, r.NormalizedName })
+                .IsUnique()
+                .HasDatabaseName("RoleNameIndex")
+                .HasFilter("[NormalizedName] IS NOT NULL");
+        });
+
+        modelBuilder.Entity<ApplicationUser>(b =>
+        {
+            b.HasIndex(u => u.NormalizedUserName).IsUnique(false).HasDatabaseName("UserNormalizedUserNameIndex");
+            b.HasIndex(u => new { u.TenantId, u.NormalizedUserName })
+                .IsUnique()
+                .HasDatabaseName("UserNameIndex")
+                .HasFilter("[NormalizedUserName] IS NOT NULL");
+        });
     }
 
     /// <summary>
