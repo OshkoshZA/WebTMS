@@ -20,9 +20,10 @@ public record AddLoadLegRequest(
     LoadLegExecutionType ExecutionType,
     Guid CostCentreId,
     Guid? VehicleId,
-    Guid? DriverId);
+    Guid? DriverId,
+    Guid? SubcontractorId);
 
-public record AllocateLoadLegRequest(Guid VehicleId, Guid DriverId);
+public record AllocateLoadLegRequest(Guid? VehicleId, Guid? DriverId, Guid? SubcontractorId);
 
 public record AddCommodityLineRequest(
     Guid CommodityId,
@@ -148,10 +149,28 @@ public class LoadsController : ControllerBase
             return NotFound($"Location {request.DestinationLocationId} (destination) was not found.");
         if (!await _db.CostCentres.AnyAsync(c => c.Id == request.CostCentreId, ct))
             return NotFound($"Cost centre {request.CostCentreId} was not found.");
+
+        // A leg is resourced one way or the other, never both (§5.1/§8.2) — own fleet
+        // by Vehicle+Driver, subcontracted by Subcontractor — so the field that
+        // doesn't match ExecutionType is rejected outright rather than silently ignored.
+        if (request.ExecutionType == LoadLegExecutionType.Subcontracted && (request.VehicleId is not null || request.DriverId is not null))
+            return BadRequest("A Subcontracted leg cannot also carry a VehicleId/DriverId.");
+        if (request.ExecutionType == LoadLegExecutionType.OwnFleet && request.SubcontractorId is not null)
+            return BadRequest("An OwnFleet leg cannot also carry a SubcontractorId.");
+
         if (request.VehicleId is Guid vehicleId && !await _db.Vehicles.AnyAsync(v => v.Id == vehicleId, ct))
             return NotFound($"Vehicle {vehicleId} was not found.");
         if (request.DriverId is Guid driverId && !await _db.Drivers.AnyAsync(d => d.Id == driverId, ct))
             return NotFound($"Driver {driverId} was not found.");
+        if (request.SubcontractorId is Guid subcontractorId && !await _db.Subcontractors.AnyAsync(s => s.Id == subcontractorId, ct))
+            return NotFound($"Subcontractor {subcontractorId} was not found.");
+
+        // Reaching Allocated (§5.2, §8.2) means different things depending on how the
+        // leg is resourced: Vehicle+Driver for OwnFleet, a Subcontractor assignment for
+        // Subcontracted — not both.
+        var isAllocated = request.ExecutionType == LoadLegExecutionType.Subcontracted
+            ? request.SubcontractorId is not null
+            : request.VehicleId is not null && request.DriverId is not null;
 
         var leg = new LoadLeg
         {
@@ -165,9 +184,8 @@ public class LoadsController : ControllerBase
             CostCentreId = request.CostCentreId,
             VehicleId = request.VehicleId,
             DriverId = request.DriverId,
-            Status = request.VehicleId is not null && request.DriverId is not null
-                ? LoadLegStatus.Allocated
-                : LoadLegStatus.Planned
+            SubcontractorId = request.SubcontractorId,
+            Status = isAllocated ? LoadLegStatus.Allocated : LoadLegStatus.Planned
         };
 
         _db.LoadLegs.Add(leg);
@@ -179,7 +197,7 @@ public class LoadsController : ControllerBase
         return CreatedAtAction(nameof(Get), new { id = load.Id }, leg);
     }
 
-    /// <summary>Assigns a vehicle and driver to a leg that was created without one yet, moving it from Planned to Allocated.</summary>
+    /// <summary>Assigns a leg's resource — Vehicle+Driver for OwnFleet, a Subcontractor for Subcontracted (§5.2, §8.2) — moving it from Planned to Allocated.</summary>
     [HttpPost("{id:guid}/legs/{legId:guid}/allocate")]
     public async Task<IActionResult> AllocateLeg(Guid id, Guid legId, AllocateLoadLegRequest request, CancellationToken ct)
     {
@@ -192,13 +210,29 @@ public class LoadsController : ControllerBase
             return Conflict($"Leg is {leg.Status}; only a Planned leg can be allocated.");
         if (load.Status == LoadStatus.OnHold)
             return Conflict("Load is On Hold; release it before allocating further legs.");
-        if (!await _db.Vehicles.AnyAsync(v => v.Id == request.VehicleId, ct))
-            return NotFound($"Vehicle {request.VehicleId} was not found.");
-        if (!await _db.Drivers.AnyAsync(d => d.Id == request.DriverId, ct))
-            return NotFound($"Driver {request.DriverId} was not found.");
 
-        leg.VehicleId = request.VehicleId;
-        leg.DriverId = request.DriverId;
+        if (leg.ExecutionType == LoadLegExecutionType.Subcontracted)
+        {
+            if (request.SubcontractorId is null || request.VehicleId is not null || request.DriverId is not null)
+                return BadRequest("A Subcontracted leg is allocated with SubcontractorId only.");
+            if (!await _db.Subcontractors.AnyAsync(s => s.Id == request.SubcontractorId, ct))
+                return NotFound($"Subcontractor {request.SubcontractorId} was not found.");
+
+            leg.SubcontractorId = request.SubcontractorId;
+        }
+        else
+        {
+            if (request.VehicleId is null || request.DriverId is null || request.SubcontractorId is not null)
+                return BadRequest("An OwnFleet leg is allocated with VehicleId and DriverId only.");
+            if (!await _db.Vehicles.AnyAsync(v => v.Id == request.VehicleId, ct))
+                return NotFound($"Vehicle {request.VehicleId} was not found.");
+            if (!await _db.Drivers.AnyAsync(d => d.Id == request.DriverId, ct))
+                return NotFound($"Driver {request.DriverId} was not found.");
+
+            leg.VehicleId = request.VehicleId;
+            leg.DriverId = request.DriverId;
+        }
+
         leg.Status = LoadLegStatus.Allocated;
 
         await RecomputeLoadStatusAsync(load, ct);
@@ -206,7 +240,7 @@ public class LoadsController : ControllerBase
         return NoContent();
     }
 
-    /// <summary>Marks a leg as under way. Requires the leg to already be Allocated (own fleet only, Phase 1 — §5.1).</summary>
+    /// <summary>Marks a leg as under way. Requires the leg to already be Allocated (§5.1) — the same transition for an OwnFleet or a Subcontracted leg, only how Allocated was reached differs.</summary>
     [HttpPost("{id:guid}/legs/{legId:guid}/start")]
     public async Task<IActionResult> StartLeg(Guid id, Guid legId, CancellationToken ct)
     {
