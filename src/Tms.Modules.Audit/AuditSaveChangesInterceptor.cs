@@ -2,6 +2,7 @@ using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.ChangeTracking;
 using Microsoft.EntityFrameworkCore.Diagnostics;
+using Tms.Modules.Identity;
 using Tms.Shared;
 
 namespace Tms.Modules.Audit;
@@ -43,7 +44,10 @@ public class AuditSaveChangesInterceptor : SaveChangesInterceptor
 
         var entries = new List<AuditEntry>();
 
-        foreach (var entry in context.ChangeTracker.Entries())
+        // Materialized to a list before iterating: ResolveTenantId can call context.Find,
+        // which may attach a newly-loaded entity to this same ChangeTracker mid-loop —
+        // enumerating the live tracker directly would then throw "collection modified".
+        foreach (var entry in context.ChangeTracker.Entries().ToList())
         {
             // The audit store itself is append-only — never audit changes to AuditEntry.
             if (entry.Entity is AuditEntry) continue;
@@ -59,7 +63,7 @@ public class AuditSaveChangesInterceptor : SaveChangesInterceptor
 
             entries.Add(new AuditEntry
             {
-                TenantId = ResolveTenantId(entry),
+                TenantId = ResolveTenantId(entry, context),
                 CompanyId = ResolveCompanyId(entry),
                 EntityType = entry.Entity.GetType().Name,
                 EntityId = ResolveEntityId(entry),
@@ -81,11 +85,34 @@ public class AuditSaveChangesInterceptor : SaveChangesInterceptor
         }
     }
 
-    private static Guid ResolveTenantId(EntityEntry entry) =>
-        entry.Entity is TenantScopedEntity tenantScoped ? tenantScoped.TenantId : Guid.Empty;
+    /// <summary>
+    /// TenantScopedEntity covers most of the model, but ApplicationUser/ApplicationRole
+    /// carry TenantId directly without deriving from it (they extend IdentityUser/
+    /// IdentityRole instead), and UserCompanyRole/RoleFunction/ApiClientRole are plain
+    /// join tables with no TenantId of their own at all — their tenant only exists on
+    /// whichever parent they reference. context.Find checks this same ChangeTracker
+    /// first (so a parent created in the very same SaveChanges call, e.g. a new
+    /// ApiClient and its ApiClientRole, resolves with no extra query) and falls back to
+    /// a real lookup otherwise.
+    /// </summary>
+    private static Guid ResolveTenantId(EntityEntry entry, DbContext context) => entry.Entity switch
+    {
+        TenantScopedEntity tenantScoped => tenantScoped.TenantId,
+        ApplicationUser user => user.TenantId,
+        ApplicationRole role => role.TenantId,
+        UserCompanyRole ucr => context.Find<Company>(ucr.CompanyId)?.TenantId ?? Guid.Empty,
+        RoleFunction rf => context.Find<ApplicationRole>(rf.RoleId)?.TenantId ?? Guid.Empty,
+        ApiClientRole acr => context.Find<ApiClient>(acr.ApiClientId)?.TenantId ?? Guid.Empty,
+        _ => Guid.Empty
+    };
 
-    private static Guid? ResolveCompanyId(EntityEntry entry) =>
-        entry.Entity is CompanyScopedEntity companyScoped ? companyScoped.CompanyId : null;
+    private static Guid? ResolveCompanyId(EntityEntry entry) => entry.Entity switch
+    {
+        CompanyScopedEntity companyScoped => companyScoped.CompanyId,
+        UserCompanyRole ucr => ucr.CompanyId,
+        ApiClientRole acr => acr.CompanyId,
+        _ => null
+    };
 
     private static string ResolveEntityId(EntityEntry entry)
     {
