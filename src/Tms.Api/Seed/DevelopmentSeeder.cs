@@ -164,7 +164,9 @@ public static class DevelopmentSeeder
             ("integration.apiclient.manage",
              "Create, rotate secrets for, and revoke system-to-system API clients (§11.1)."),
             ("identity.user.manage",
-             "Create, update, deactivate/reactivate internal users, and manage their company/role assignments (§07).")
+             "Create, update, deactivate/reactivate internal users, and manage their company/role assignments (§07)."),
+            ("identity.role.manage",
+             "Create roles and grant/revoke the functions they carry (§07) — distinct from identity.user.manage, since defining what a role can do is more sensitive than assigning an existing one.")
         };
 
         var adminRole = await roleManager.FindByNameAsync(AdminRoleName);
