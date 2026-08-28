@@ -1,4 +1,6 @@
+using System.Data;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Storage;
 using Tms.Infrastructure;
 using Tms.Modules.Billing;
 using Tms.Modules.Loads;
@@ -24,13 +26,14 @@ public record CreditStatus(
 /// referenced by an InvoiceLine, so a load moves from WIP to AR one line at a time as
 /// each of its commodity lines gets billed, not all-or-nothing at the load level.
 ///
-/// KNOWN LIMITATION (docs/architecture.html §5.4): this reads exposure with no lock
-/// and no elevated isolation, so it is not atomic with the SaveChangesAsync the caller
-/// runs afterward. Two genuinely concurrent writes against the same client can each
-/// read exposure before the other commits and both pass the hard-stop check, together
-/// exceeding CreditLimit. Accepted as a Phase 1 gap — closing it means row-locking or
-/// a serializable transaction around the check-and-save, at the cost of added lock
-/// contention on every load/commodity-line write.
+/// Closing the concurrency gap this class used to carry (docs/architecture.html §5.4):
+/// a caller now wraps its check-and-save in BeginCreditLockAsync, which takes a
+/// transaction-scoped SQL Server application lock per client before GetStatusAsync
+/// ever runs. A second concurrent write against the *same* client blocks until the
+/// first transaction commits or rolls back, so it always reads exposure that already
+/// reflects whatever the first one did — the two race-condition requests from the
+/// known limitation now serialize instead of both reading stale exposure. The lock is
+/// scoped per client, so different clients never contend with each other.
 /// </summary>
 public class CreditExposureService
 {
@@ -49,6 +52,58 @@ public class CreditExposureService
     public CreditExposureService(TmsDbContext db)
     {
         _db = db;
+    }
+
+    /// <summary>
+    /// Begins a transaction and acquires an exclusive, transaction-scoped SQL Server
+    /// application lock for this client (docs/architecture.html §5.4) — call this
+    /// before GetStatusAsync/WouldBreach and hold it open through whatever the caller
+    /// then adds and saves, so the whole check-and-save is atomic per client. A second
+    /// caller for the same client blocks here (up to 10s) until the first commits or
+    /// rolls back. @LockOwner = 'Transaction' means the lock releases automatically
+    /// when the returned transaction is committed, rolled back, or disposed without
+    /// either — the caller never needs to release it explicitly.
+    /// </summary>
+    public async Task<IDbContextTransaction> BeginCreditLockAsync(Guid tenantId, Guid clientId, CancellationToken ct)
+    {
+        var transaction = await _db.Database.BeginTransactionAsync(ct);
+
+        // sp_getapplock's return code comes back as a stored-procedure RETURN value,
+        // not a result set — SqlQueryRaw/FromSql can't express that (and can't compose
+        // a multi-statement batch with a LINQ operator like SingleAsync at all), so
+        // this goes through plain ADO.NET on the same connection/transaction instead.
+        var connection = _db.Database.GetDbConnection();
+        await using var command = connection.CreateCommand();
+        command.CommandText = "sp_getapplock";
+        command.CommandType = CommandType.StoredProcedure;
+        command.Transaction = transaction.GetDbTransaction();
+
+        void AddParam(string name, object value, ParameterDirection direction = ParameterDirection.Input)
+        {
+            var parameter = command.CreateParameter();
+            parameter.ParameterName = name;
+            parameter.Value = value;
+            parameter.Direction = direction;
+            command.Parameters.Add(parameter);
+        }
+
+        AddParam("@Resource", $"credit:{tenantId}:{clientId}");
+        AddParam("@LockMode", "Exclusive");
+        AddParam("@LockOwner", "Transaction");
+        AddParam("@LockTimeout", 10000);
+        AddParam("@ReturnValue", 0, ParameterDirection.ReturnValue);
+
+        await command.ExecuteNonQueryAsync(ct);
+
+        var lockResult = (int)command.Parameters["@ReturnValue"].Value!;
+        if (lockResult < 0)
+        {
+            await transaction.RollbackAsync(ct);
+            throw new InvalidOperationException(
+                $"Could not acquire the credit lock for client {clientId} (sp_getapplock returned {lockResult}).");
+        }
+
+        return transaction;
     }
 
     public async Task<CreditStatus> GetStatusAsync(Client client, CancellationToken ct)

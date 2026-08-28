@@ -89,11 +89,17 @@ public class LoadsController : ControllerBase
         if (!await _db.LoadTypes.AnyAsync(lt => lt.Id == request.LoadTypeId, ct))
             return NotFound($"Load type {request.LoadTypeId} was not found.");
 
+        // Holds an exclusive, per-client SQL Server application lock for the rest of
+        // this method (§5.4) — a concurrent Create/AddCommodityLine for the same
+        // client blocks here until this transaction commits or rolls back, so the
+        // credit check below can never race another one reading stale exposure.
+        await using var creditLock = await _creditExposure.BeginCreditLockAsync(_tenantContext.TenantId.Value, client.Id, ct);
+
         // A brand-new load carries no sell value yet, so the only thing worth
         // checking here is whether the client is *already* over limit from prior
         // loads — in which case starting another one is refused outright too.
         var creditCheck = await CheckCreditAsync(client, additionalAmount: 0m, request.CreditOverrideReason, ct);
-        if (creditCheck is not null) return creditCheck;
+        if (creditCheck is not null) return creditCheck; // creditLock disposed uncommitted -> rolled back
 
         var load = new Load
         {
@@ -107,6 +113,7 @@ public class LoadsController : ControllerBase
 
         _db.Loads.Add(load);
         await _db.SaveChangesAsync(ct);
+        await creditLock.CommitAsync(ct);
 
         return CreatedAtAction(nameof(Get), new { id = load.Id }, load);
     }
@@ -359,8 +366,12 @@ public class LoadsController : ControllerBase
 
         var sellAmount = request.Quantity * request.SellRatePerUnit;
 
+        // See Create's identical use of this lock (§5.4) — same per-client resource,
+        // so the two endpoints serialize against each other too, not just themselves.
+        await using var creditLock = await _creditExposure.BeginCreditLockAsync(_tenantContext.TenantId.Value, client.Id, ct);
+
         var creditCheck = await CheckCreditAsync(client, sellAmount, request.CreditOverrideReason, ct);
-        if (creditCheck is not null) return creditCheck;
+        if (creditCheck is not null) return creditCheck; // creditLock disposed uncommitted -> rolled back
 
         var commodityLine = new CommodityLine
         {
@@ -387,6 +398,7 @@ public class LoadsController : ControllerBase
         });
 
         await _db.SaveChangesAsync(ct);
+        await creditLock.CommitAsync(ct);
 
         return CreatedAtAction(nameof(Get), new { id }, commodityLine);
     }
