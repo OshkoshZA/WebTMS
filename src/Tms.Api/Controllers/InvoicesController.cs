@@ -1,0 +1,180 @@
+using Asp.Versioning;
+using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
+using Tms.Infrastructure;
+using Tms.Modules.Billing;
+using Tms.Modules.Loads;
+using Tms.Modules.Rating;
+using Tms.Shared;
+
+namespace Tms.Api.Controllers;
+
+public record GenerateInvoiceRequest(Guid ClientId, DateOnly? IssueDate = null);
+public record IssueInvoiceRequest(DateOnly? IssueDate = null);
+
+public record InvoiceLineResponse(Guid Id, Guid RateLineSellId, string Description, decimal Quantity, Guid UnitOfMeasureId, decimal Rate, decimal Amount);
+
+public record InvoiceResponse(
+    Guid Id, string InvoiceNumber, Guid ClientId, Guid FinancialPeriodId, DateOnly IssueDate, DateOnly DueDate,
+    InvoiceStatus Status, decimal TotalExVat, decimal VatAmount, decimal TotalIncVat, bool IsOverdue,
+    IReadOnlyList<InvoiceLineResponse> Lines);
+
+/// <summary>
+/// Sell-side invoicing (docs/architecture.html §10.1) — one line per approved commodity
+/// line, in the Client's fixed currency, posted against the Company's current open
+/// FinancialPeriod (§10.3). Debrief approval doesn't exist yet (§09, a later phase), so
+/// Generate aggregates a client's unbilled sell RateLines from Delivered loads instead —
+/// the closest already-implemented stand-in for "ready to bill." "Overdue" isn't a
+/// stored status; it's derived from DueDate, same as the doc describes.
+/// </summary>
+[ApiController]
+[ApiVersion("1.0")]
+[Route("api/v{version:apiVersion}/invoices")]
+[Authorize]
+public class InvoicesController : ControllerBase
+{
+    private readonly TmsDbContext _db;
+    private readonly ITenantContext _tenantContext;
+
+    public InvoicesController(TmsDbContext db, ITenantContext tenantContext)
+    {
+        _db = db;
+        _tenantContext = tenantContext;
+    }
+
+    [HttpGet]
+    public async Task<ActionResult<IEnumerable<InvoiceResponse>>> List(CancellationToken ct)
+    {
+        var invoices = await _db.Invoices.Include(i => i.Lines).OrderByDescending(i => i.IssueDate).ToListAsync(ct);
+        return Ok(invoices.Select(ToResponse));
+    }
+
+    [HttpGet("{id:guid}")]
+    public async Task<ActionResult<InvoiceResponse>> Get(Guid id, CancellationToken ct)
+    {
+        var invoice = await _db.Invoices.Include(i => i.Lines).FirstOrDefaultAsync(i => i.Id == id, ct);
+        return invoice is null ? NotFound() : Ok(ToResponse(invoice));
+    }
+
+    /// <summary>Aggregates a client's unbilled sell lines into a new Draft invoice — one InvoiceLine per CommodityLine, never blended (§10.1: "a multi-product delivery produces one invoice with a line per product").</summary>
+    [HttpPost("generate")]
+    [Authorize(Policy = "finance.invoice.manage")]
+    public async Task<ActionResult<InvoiceResponse>> Generate(GenerateInvoiceRequest request, CancellationToken ct)
+    {
+        if (_tenantContext.TenantId is null || _tenantContext.CompanyId is null)
+            return Unauthorized("Request is missing a resolved Tenant/Company context.");
+
+        var client = await _db.Clients.FirstOrDefaultAsync(c => c.Id == request.ClientId, ct);
+        if (client is null) return NotFound($"Client {request.ClientId} was not found.");
+
+        var openPeriod = await _db.FinancialPeriods.FirstOrDefaultAsync(
+            p => p.CompanyId == _tenantContext.CompanyId && p.Status == FinancialPeriodStatus.Open, ct);
+        if (openPeriod is null)
+            return Conflict("No open financial period for this company — create one first (POST /api/v1/financial-years).");
+
+        var alreadyInvoicedRateLineIds = _db.InvoiceLines.Select(l => l.RateLineSellId);
+
+        var candidates = await _db.Set<RateLine>()
+            .Where(r => r.Direction == RateLineDirection.Sell && r.SourceType == RateLineSourceType.CommodityLine)
+            .Where(r => !alreadyInvoicedRateLineIds.Contains(r.Id))
+            .Join(_db.Set<CommodityLine>(), r => r.SourceId, cl => cl.Id, (r, cl) => new { r, cl })
+            .Join(_db.Set<LoadLeg>(), x => x.cl.LoadLegId, leg => leg.Id, (x, leg) => new { x.r, x.cl, leg })
+            .Join(_db.Loads, x => x.leg.LoadId, load => load.Id, (x, load) => new { x.r, x.cl, load })
+            .Where(x => x.load.ClientId == request.ClientId && x.load.Status == LoadStatus.Delivered)
+            .Select(x => new { x.r, x.cl })
+            .ToListAsync(ct);
+
+        if (candidates.Count == 0)
+            return Conflict("No unbilled, Delivered sell lines found for this client.");
+
+        var commodityIds = candidates.Select(x => x.cl.CommodityId).Distinct().ToList();
+        var commodityNames = await _db.Commodities
+            .Where(c => commodityIds.Contains(c.Id))
+            .ToDictionaryAsync(c => c.Id, c => c.Name, ct);
+
+        var issueDate = request.IssueDate ?? DateOnly.FromDateTime(DateTime.UtcNow);
+        var invoice = new Invoice
+        {
+            TenantId = _tenantContext.TenantId.Value,
+            CompanyId = _tenantContext.CompanyId.Value,
+            InvoiceNumber = await NextInvoiceNumberAsync(_tenantContext.CompanyId.Value, ct),
+            ClientId = client.Id,
+            FinancialPeriodId = openPeriod.Id,
+            IssueDate = issueDate,
+            DueDate = issueDate.AddDays(client.PaymentTermsDays)
+        };
+
+        foreach (var x in candidates)
+        {
+            invoice.Lines.Add(new InvoiceLine
+            {
+                TenantId = invoice.TenantId,
+                CompanyId = invoice.CompanyId,
+                RateLineSellId = x.r.Id,
+                Description = commodityNames.GetValueOrDefault(x.cl.CommodityId, "Commodity"),
+                Quantity = x.cl.Quantity,
+                UnitOfMeasureId = x.cl.UnitOfMeasureId,
+                Rate = x.r.RatePerUnit,
+                Amount = x.r.Amount
+            });
+        }
+
+        invoice.TotalExVat = invoice.Lines.Sum(l => l.Amount);
+        invoice.VatAmount = 0m; // TODO: no VAT-rate configuration exists in this codebase yet
+        invoice.TotalIncVat = invoice.TotalExVat + invoice.VatAmount;
+
+        _db.Invoices.Add(invoice);
+        await _db.SaveChangesAsync(ct);
+
+        return CreatedAtAction(nameof(Get), new { id = invoice.Id }, ToResponse(invoice));
+    }
+
+    /// <summary>Draft -> Issued. DueDate is recomputed from the issue date given here (or today), so a Draft that sat around doesn't silently issue with a stale due date.</summary>
+    [HttpPost("{id:guid}/issue")]
+    [Authorize(Policy = "finance.invoice.manage")]
+    public async Task<IActionResult> Issue(Guid id, IssueInvoiceRequest request, CancellationToken ct)
+    {
+        var invoice = await _db.Invoices.FirstOrDefaultAsync(i => i.Id == id, ct);
+        if (invoice is null) return NotFound();
+        if (invoice.Status != InvoiceStatus.Draft)
+            return Conflict($"Invoice is {invoice.Status}; only a Draft invoice can be issued.");
+
+        var client = await _db.Clients.FirstAsync(c => c.Id == invoice.ClientId, ct);
+        invoice.IssueDate = request.IssueDate ?? DateOnly.FromDateTime(DateTime.UtcNow);
+        invoice.DueDate = invoice.IssueDate.AddDays(client.PaymentTermsDays);
+        invoice.Status = InvoiceStatus.Issued;
+
+        await _db.SaveChangesAsync(ct);
+        return NoContent();
+    }
+
+    /// <summary>Draft -> Void — the only cancellation path (§10.1), and only while still Draft.</summary>
+    [HttpPost("{id:guid}/void")]
+    [Authorize(Policy = "finance.invoice.manage")]
+    public async Task<IActionResult> Void(Guid id, CancellationToken ct)
+    {
+        var invoice = await _db.Invoices.FirstOrDefaultAsync(i => i.Id == id, ct);
+        if (invoice is null) return NotFound();
+        if (invoice.Status != InvoiceStatus.Draft)
+            return Conflict($"Invoice is {invoice.Status}; only a Draft invoice can be voided.");
+
+        invoice.Status = InvoiceStatus.Void;
+        await _db.SaveChangesAsync(ct);
+        return NoContent();
+    }
+
+    /// <summary>Sequential per Company from a row count — same accepted concurrency caveat as CreditExposureService: two simultaneous Generate calls could race to the same number.</summary>
+    private async Task<string> NextInvoiceNumberAsync(Guid companyId, CancellationToken ct)
+    {
+        var company = await _db.Companies.FirstAsync(c => c.Id == companyId, ct);
+        var count = await _db.Invoices.CountAsync(i => i.CompanyId == companyId, ct);
+        return $"{company.InvoiceNumberPrefix}{count + 1:D6}";
+    }
+
+    internal static InvoiceResponse ToResponse(Invoice invoice) => new(
+        invoice.Id, invoice.InvoiceNumber, invoice.ClientId, invoice.FinancialPeriodId, invoice.IssueDate, invoice.DueDate,
+        invoice.Status, invoice.TotalExVat, invoice.VatAmount, invoice.TotalIncVat,
+        IsOverdue: invoice.Status is InvoiceStatus.Issued or InvoiceStatus.PartPaid && invoice.DueDate < DateOnly.FromDateTime(DateTime.UtcNow),
+        invoice.Lines.Select(l => new InvoiceLineResponse(l.Id, l.RateLineSellId, l.Description, l.Quantity, l.UnitOfMeasureId, l.Rate, l.Amount)).ToList());
+}

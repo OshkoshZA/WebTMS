@@ -170,7 +170,9 @@ public static class DevelopmentSeeder
             ("finance.calendar.manage",
              "Create a Company's FinancialYears and their periods (§10.3)."),
             ("finance.period.close",
-             "Close a FinancialPeriod, opening the next one and rolling every Client's debtors aging forward (§10.3) — one-directional, like every other approval boundary in this design.")
+             "Close a FinancialPeriod, opening the next one and rolling every Client's debtors aging forward (§10.3) — one-directional, like every other approval boundary in this design."),
+            ("finance.invoice.manage",
+             "Generate, issue, and void sell-side invoices (§10.1).")
         };
 
         var adminRole = await roleManager.FindByNameAsync(AdminRoleName);

@@ -1,5 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using Tms.Infrastructure;
+using Tms.Modules.Billing;
 using Tms.Modules.Loads;
 using Tms.Modules.Rating;
 
@@ -16,12 +17,12 @@ public record CreditStatus(
 /// Implements the credit control formula from docs/architecture.html §5.4:
 /// Total Exposure = AR Outstanding + WIP; Available Credit = CreditLimit − Total Exposure.
 ///
-/// AR Outstanding (issued/part-paid invoice balances) is hardcoded to zero for now —
-/// Tms.Modules.Billing (§10.1) doesn't exist yet, so there is nothing to sum. WIP is
-/// real: the sell value of every one of the client's loads that hasn't reached
-/// Invoiced yet, computed directly from CommodityLine sell RateLines, which already
-/// exist in Phase 1. Swap in the real AR figure here — and nowhere else — once
-/// Billing lands; every caller of this service stays correct automatically.
+/// AR Outstanding is now real: Issued/PartPaid Invoice balances for the client (§10.1),
+/// net of credit notes — CreditNote doesn't exist yet (a later phase of Billing), so
+/// there's nothing to net against until it does. WIP is the sell value of the client's
+/// not-yet-invoiced loads — a CommodityLine's sell RateLine is excluded the moment it's
+/// referenced by an InvoiceLine, so a load moves from WIP to AR one line at a time as
+/// each of its commodity lines gets billed, not all-or-nothing at the load level.
 ///
 /// KNOWN LIMITATION (docs/architecture.html §5.4): this reads exposure with no lock
 /// and no elevated isolation, so it is not atomic with the SaveChangesAsync the caller
@@ -52,12 +53,15 @@ public class CreditExposureService
 
     public async Task<CreditStatus> GetStatusAsync(Client client, CancellationToken ct)
     {
-        // TODO (§10.1): once Invoice exists, sum Issued/PartPaid balances for this
-        // client here, net of credit notes. Zero is correct only until then.
-        const decimal arOutstanding = 0m;
+        var arOutstanding = await _db.Set<Invoice>()
+            .Where(i => i.ClientId == client.Id && (i.Status == InvoiceStatus.Issued || i.Status == InvoiceStatus.PartPaid))
+            .SumAsync(i => i.TotalIncVat, ct);
+
+        var invoicedRateLineIds = _db.Set<InvoiceLine>().Select(l => l.RateLineSellId);
 
         var wip = await _db.Set<RateLine>()
             .Where(r => r.Direction == RateLineDirection.Sell && r.SourceType == RateLineSourceType.CommodityLine)
+            .Where(r => !invoicedRateLineIds.Contains(r.Id))
             .Join(_db.Set<CommodityLine>(), r => r.SourceId, cl => cl.Id, (r, cl) => new { r, cl })
             .Join(_db.Set<LoadLeg>(), x => x.cl.LoadLegId, leg => leg.Id, (x, leg) => new { x.r, leg })
             .Join(_db.Set<Load>(), x => x.leg.LoadId, load => load.Id, (x, load) => new { x.r, load })

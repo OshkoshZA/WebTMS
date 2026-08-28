@@ -70,10 +70,12 @@ public class TmsDbContext : IdentityDbContext<ApplicationUser, ApplicationRole, 
     // Rating (§08)
     public DbSet<RateLine> RateLines => Set<RateLine>();
 
-    // Billing (§10.3 — financial calendar; §10.1/§10.2 land in later phases)
+    // Billing (§10.3 financial calendar, §10.1 Invoice/InvoiceLine; the rest of §10.1/§10.2 land in later phases)
     public DbSet<FinancialYear> FinancialYears => Set<FinancialYear>();
     public DbSet<FinancialPeriod> FinancialPeriods => Set<FinancialPeriod>();
     public DbSet<DebtorsAgingSnapshot> DebtorsAgingSnapshots => Set<DebtorsAgingSnapshot>();
+    public DbSet<Invoice> Invoices => Set<Invoice>();
+    public DbSet<InvoiceLine> InvoiceLines => Set<InvoiceLine>();
 
     // Privacy (§14)
     public DbSet<RetentionPolicy> RetentionPolicies => Set<RetentionPolicy>();
@@ -115,6 +117,18 @@ public class TmsDbContext : IdentityDbContext<ApplicationUser, ApplicationRole, 
         modelBuilder.Entity<DebtorsAgingSnapshot>().Property(s => s.Days90).HasPrecision(18, 2);
         modelBuilder.Entity<DebtorsAgingSnapshot>().Property(s => s.Days90Plus).HasPrecision(18, 2);
         modelBuilder.Entity<DebtorsAgingSnapshot>().Property(s => s.TotalOutstanding).HasPrecision(18, 2);
+
+        modelBuilder.Entity<Invoice>()
+            .HasMany(i => i.Lines)
+            .WithOne()
+            .HasForeignKey(l => l.InvoiceId);
+
+        modelBuilder.Entity<Invoice>().Property(i => i.TotalExVat).HasPrecision(18, 2);
+        modelBuilder.Entity<Invoice>().Property(i => i.VatAmount).HasPrecision(18, 2);
+        modelBuilder.Entity<Invoice>().Property(i => i.TotalIncVat).HasPrecision(18, 2);
+        modelBuilder.Entity<InvoiceLine>().Property(l => l.Quantity).HasPrecision(18, 3);
+        modelBuilder.Entity<InvoiceLine>().Property(l => l.Rate).HasPrecision(18, 4);
+        modelBuilder.Entity<InvoiceLine>().Property(l => l.Amount).HasPrecision(18, 2);
 
         ApplyTenancyScopeFilters(modelBuilder);
 

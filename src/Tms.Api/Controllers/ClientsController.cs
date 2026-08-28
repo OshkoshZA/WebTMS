@@ -4,6 +4,7 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Tms.Api.Services;
 using Tms.Infrastructure;
+using Tms.Modules.Billing;
 using Tms.Modules.Loads;
 using Tms.Shared;
 
@@ -112,5 +113,20 @@ public class ClientsController : ControllerBase
         client.Status = ClientStatus.Deactivated; // never a hard delete — §11.5
         await _db.SaveChangesAsync(ct);
         return NoContent();
+    }
+
+    /// <summary>Invoices raised against a client (docs/architecture.html §11.2) — credit-note detail isn't included yet, since CreditNote doesn't exist (§10.1, a later phase).</summary>
+    [HttpGet("{id:guid}/invoices")]
+    public async Task<ActionResult<IEnumerable<InvoiceResponse>>> Invoices(Guid id, CancellationToken ct)
+    {
+        if (!await _db.Clients.AnyAsync(c => c.Id == id, ct)) return NotFound();
+
+        var invoices = await _db.Invoices
+            .Include(i => i.Lines)
+            .Where(i => i.ClientId == id)
+            .OrderByDescending(i => i.IssueDate)
+            .ToListAsync(ct);
+
+        return Ok(invoices.Select(InvoicesController.ToResponse));
     }
 }
