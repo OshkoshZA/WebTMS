@@ -61,6 +61,9 @@ public class AuthController : ControllerBase
         if (user is null || !await _userManager.CheckPasswordAsync(user, request.Password))
             return Unauthorized("Invalid email or password.");
 
+        if (user.Status == UserStatus.Deactivated)
+            return Unauthorized("This account has been deactivated.");
+
         // A user's company assignments (§07) — which Company(ies) they hold a role in.
         var assignments = await _db.UserCompanyRoles
             .Where(ucr => ucr.UserId == user.Id)
@@ -122,6 +125,17 @@ public class AuthController : ControllerBase
         var user = await _userManager.FindByIdAsync(existing.UserId.ToString());
         if (user is null)
             return Unauthorized(new { error = "invalid_grant" });
+
+        if (user.Status == UserStatus.Deactivated)
+        {
+            // Deactivating a user must actually cut off access, not just block new
+            // logins — revoke this rotation family rather than merely refusing the
+            // refresh, so any access token already out there expires and is never
+            // renewed.
+            await _refreshTokens.RevokeFamilyAsync(existing.FamilyId, ct);
+            await _db.SaveChangesAsync(ct);
+            return Unauthorized(new { error = "invalid_grant", detail = "This account has been deactivated." });
+        }
 
         existing.RevokedAt = DateTimeOffset.UtcNow; // this one is now spent — rotation, not reuse
 

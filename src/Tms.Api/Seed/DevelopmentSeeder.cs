@@ -162,7 +162,9 @@ public static class DevelopmentSeeder
             ("client.master.manage",
              "Create, update, and deactivate Client master data, including its credit limit and payment terms (§11.2)."),
             ("integration.apiclient.manage",
-             "Create, rotate secrets for, and revoke system-to-system API clients (§11.1).")
+             "Create, rotate secrets for, and revoke system-to-system API clients (§11.1)."),
+            ("identity.user.manage",
+             "Create, update, deactivate/reactivate internal users, and manage their company/role assignments (§07).")
         };
 
         var adminRole = await roleManager.FindByNameAsync(AdminRoleName);
