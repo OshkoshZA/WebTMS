@@ -60,6 +60,7 @@ public class TmsDbContext : IdentityDbContext<ApplicationUser, ApplicationRole, 
 
     // Loads (§5.1, §5.2, §5.5)
     public DbSet<Client> Clients => Set<Client>();
+    public DbSet<Subcontractor> Subcontractors => Set<Subcontractor>();
     public DbSet<CostCentre> CostCentres => Set<CostCentre>();
     public DbSet<Commodity> Commodities => Set<Commodity>();
     public DbSet<Load> Loads => Set<Load>();

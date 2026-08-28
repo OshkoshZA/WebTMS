@@ -172,7 +172,9 @@ public static class DevelopmentSeeder
             ("finance.period.close",
              "Close a FinancialPeriod, opening the next one and rolling every Client's debtors aging forward (§10.3) — one-directional, like every other approval boundary in this design."),
             ("finance.invoice.manage",
-             "Generate, issue, and void sell-side invoices (§10.1).")
+             "Generate, issue, and void sell-side invoices (§10.1)."),
+            ("subcontractor.master.manage",
+             "Create, update, and deactivate Subcontractor master data, including banking details and payment terms (§5.1, §10.2).")
         };
 
         var adminRole = await roleManager.FindByNameAsync(AdminRoleName);
