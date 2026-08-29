@@ -21,8 +21,9 @@ public record CreditStatus(
 /// Total Exposure = AR Outstanding + WIP; Available Credit = CreditLimit − Total Exposure.
 ///
 /// AR Outstanding is now real: Issued/PartPaid Invoice balances for the client (§10.1),
-/// net of credit notes — CreditNote doesn't exist yet (a later phase of Billing), so
-/// there's nothing to net against until it does. WIP is the sell value of the client's
+/// net of Issued CreditNotes against them — a Draft credit note doesn't reduce
+/// exposure yet, the same "only committed documents count" rule Invoice itself
+/// follows. WIP is the sell value of the client's
 /// not-yet-invoiced loads — a CommodityLine's sell RateLine is excluded the moment it's
 /// referenced by an InvoiceLine, so a load moves from WIP to AR one line at a time as
 /// each of its commodity lines gets billed, not all-or-nothing at the load level.
@@ -150,6 +151,12 @@ public class CreditExposureService
             .Where(i => i.ClientId == client.Id && i.CurrencyId == currencyId
                 && (i.Status == InvoiceStatus.Issued || i.Status == InvoiceStatus.PartPaid))
             .SumAsync(i => i.TotalIncVat, ct);
+
+        var issuedCreditNotes = await _db.Set<CreditNote>()
+            .Where(cn => cn.ClientId == client.Id && cn.CurrencyId == currencyId && cn.Status == CreditNoteStatus.Issued)
+            .SumAsync(cn => cn.TotalAmount, ct);
+
+        arOutstanding -= issuedCreditNotes;
 
         var invoicedRateLineIds = _db.Set<InvoiceLine>().Select(l => l.RateLineSellId);
 

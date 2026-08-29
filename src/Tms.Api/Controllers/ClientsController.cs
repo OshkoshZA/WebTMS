@@ -176,7 +176,7 @@ public class ClientsController : ControllerBase
         return NoContent();
     }
 
-    /// <summary>Invoices raised against a client (docs/architecture.html §11.2) — credit-note detail isn't included yet, since CreditNote doesn't exist (§10.1, a later phase).</summary>
+    /// <summary>Invoices raised against a client (docs/architecture.html §11.2).</summary>
     [HttpGet("{id:guid}/invoices")]
     public async Task<ActionResult<IEnumerable<InvoiceResponse>>> Invoices(Guid id, CancellationToken ct)
     {
@@ -189,5 +189,20 @@ public class ClientsController : ControllerBase
             .ToListAsync(ct);
 
         return Ok(invoices.Select(InvoicesController.ToResponse));
+    }
+
+    /// <summary>Credit notes raised against a client (docs/architecture.html §10.1, §11.2) — invoice-correcting and standalone alike.</summary>
+    [HttpGet("{id:guid}/credit-notes")]
+    public async Task<ActionResult<IEnumerable<CreditNoteResponse>>> CreditNotes(Guid id, CancellationToken ct)
+    {
+        if (!await _db.Clients.AnyAsync(c => c.Id == id, ct)) return NotFound();
+
+        var creditNotes = await _db.Set<CreditNote>()
+            .Include(cn => cn.Lines)
+            .Where(cn => cn.ClientId == id)
+            .OrderByDescending(cn => cn.IssueDate)
+            .ToListAsync(ct);
+
+        return Ok(creditNotes.Select(CreditNotesController.ToResponse));
     }
 }

@@ -246,6 +246,8 @@ public static class DevelopmentSeeder
              "Close a FinancialPeriod, opening the next one and rolling every Client's debtors aging forward (§10.3) — one-directional, like every other approval boundary in this design."),
             ("finance.invoice.manage",
              "Generate, issue, and void sell-side invoices (§10.1)."),
+            ("finance.creditnote.approve",
+             "Create, issue, and void a CreditNote — correcting an Issued invoice or a standalone goodwill adjustment (§10.1) — distinct from finance.invoice.manage since it reduces recognised revenue rather than just raising it."),
             ("subcontractor.master.manage",
              "Create, update, and deactivate Subcontractor master data, including banking details and payment terms (§5.1, §10.2)."),
             ("finance.subcontractorinvoice.process",

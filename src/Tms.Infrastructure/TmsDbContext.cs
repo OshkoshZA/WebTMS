@@ -115,6 +115,8 @@ public class TmsDbContext : IdentityDbContext<ApplicationUser, ApplicationRole, 
     public DbSet<DebtorsAgingSnapshot> DebtorsAgingSnapshots => Set<DebtorsAgingSnapshot>();
     public DbSet<Invoice> Invoices => Set<Invoice>();
     public DbSet<InvoiceLine> InvoiceLines => Set<InvoiceLine>();
+    public DbSet<CreditNote> CreditNotes => Set<CreditNote>();
+    public DbSet<CreditNoteLine> CreditNoteLines => Set<CreditNoteLine>();
     public DbSet<SubcontractorAccrual> SubcontractorAccruals => Set<SubcontractorAccrual>();
     public DbSet<SupplierInvoice> SupplierInvoices => Set<SupplierInvoice>();
     public DbSet<SubcontractorExpense> SubcontractorExpenses => Set<SubcontractorExpense>();
@@ -219,6 +221,14 @@ public class TmsDbContext : IdentityDbContext<ApplicationUser, ApplicationRole, 
             .HasIndex(l => l.RateLineSellId)
             .IsUnique()
             .HasDatabaseName("InvoiceLineRateLineSellIndex");
+
+        modelBuilder.Entity<CreditNote>()
+            .HasMany(cn => cn.Lines)
+            .WithOne()
+            .HasForeignKey(l => l.CreditNoteId);
+
+        modelBuilder.Entity<CreditNote>().Property(cn => cn.TotalAmount).HasPrecision(18, 2);
+        modelBuilder.Entity<CreditNoteLine>().Property(l => l.Amount).HasPrecision(18, 2);
 
         modelBuilder.Entity<SupplierInvoice>()
             .HasMany(si => si.Expenses)
