@@ -42,6 +42,7 @@ public class CommoditiesController : ControllerBase
     }
 
     [HttpPost]
+    [Authorize(Policy = "commodity.master.manage")]
     public async Task<ActionResult<Commodity>> Create(CreateCommodityRequest request, CancellationToken ct)
     {
         if (_tenantContext.TenantId is null || _tenantContext.CompanyId is null)
@@ -67,6 +68,7 @@ public class CommoditiesController : ControllerBase
     }
 
     [HttpPut("{id:guid}")]
+    [Authorize(Policy = "commodity.master.manage")]
     public async Task<IActionResult> Update(Guid id, UpdateCommodityRequest request, CancellationToken ct)
     {
         var commodity = await _db.Commodities.FirstOrDefaultAsync(c => c.Id == id, ct);
@@ -85,12 +87,25 @@ public class CommoditiesController : ControllerBase
     }
 
     [HttpPost("{id:guid}/deactivate")]
+    [Authorize(Policy = "commodity.master.manage")]
     public async Task<IActionResult> Deactivate(Guid id, CancellationToken ct)
     {
         var commodity = await _db.Commodities.FirstOrDefaultAsync(c => c.Id == id, ct);
         if (commodity is null) return NotFound();
 
         commodity.Active = false; // never a hard delete — §11.5
+        await _db.SaveChangesAsync(ct);
+        return NoContent();
+    }
+
+    [HttpPost("{id:guid}/reactivate")]
+    [Authorize(Policy = "commodity.master.manage")]
+    public async Task<IActionResult> Reactivate(Guid id, CancellationToken ct)
+    {
+        var commodity = await _db.Commodities.FirstOrDefaultAsync(c => c.Id == id, ct);
+        if (commodity is null) return NotFound();
+
+        commodity.Active = true;
         await _db.SaveChangesAsync(ct);
         return NoContent();
     }

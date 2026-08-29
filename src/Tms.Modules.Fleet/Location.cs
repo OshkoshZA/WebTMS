@@ -11,4 +11,7 @@ public class Location : CompanyScopedEntity
     public string Name { get; set; } = string.Empty;
     public string Province { get; set; } = string.Empty;
     public Guid CountryId { get; set; }
+
+    /// <summary>Never a hard delete (§11.5) — a Location referenced by a leg's history stays retrievable, just no longer selectable for a new one.</summary>
+    public bool Active { get; set; } = true;
 }

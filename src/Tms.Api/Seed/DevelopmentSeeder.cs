@@ -249,7 +249,19 @@ public static class DevelopmentSeeder
             ("subcontractor.master.manage",
              "Create, update, and deactivate Subcontractor master data, including banking details and payment terms (§5.1, §10.2)."),
             ("finance.subcontractorinvoice.process",
-             "Capture a subcontractor's SupplierInvoice and match it against open accruals, finalizing the SubcontractorExpense (§10.2) — an AP function, since it recognises a payable.")
+             "Capture a subcontractor's SupplierInvoice and match it against open accruals, finalizing the SubcontractorExpense (§10.2) — an AP function, since it recognises a payable."),
+            ("company.master.manage",
+             "Update a Company's own master data — legal/trading name, registration/VAT numbers, addresses, banking details, invoice numbering, logo, InvoicingEnabled (§5.1, §06)."),
+            ("vehicle.master.manage",
+             "Create, update, deactivate, and reactivate Vehicle master data (§5.1)."),
+            ("driver.master.manage",
+             "Create, update, deactivate, and reactivate Driver master data (§5.1)."),
+            ("location.master.manage",
+             "Create, update, deactivate, and reactivate Location master data (§5.1)."),
+            ("costcentre.master.manage",
+             "Create, update, deactivate, and reactivate CostCentre master data, including its parent hierarchy (§06)."),
+            ("commodity.master.manage",
+             "Create, update, deactivate, and reactivate Commodity master data (§5.5).")
         };
 
         var adminRole = await roleManager.FindByNameAsync(AdminRoleName);

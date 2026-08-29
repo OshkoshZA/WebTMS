@@ -44,6 +44,7 @@ public class LocationsController : ControllerBase
     }
 
     [HttpPost]
+    [Authorize(Policy = "location.master.manage")]
     public async Task<ActionResult<Location>> Create(CreateLocationRequest request, CancellationToken ct)
     {
         if (_tenantContext.TenantId is null || _tenantContext.CompanyId is null)
@@ -68,6 +69,7 @@ public class LocationsController : ControllerBase
     }
 
     [HttpPut("{id:guid}")]
+    [Authorize(Policy = "location.master.manage")]
     public async Task<IActionResult> Update(Guid id, UpdateLocationRequest request, CancellationToken ct)
     {
         var location = await _db.Locations.FirstOrDefaultAsync(l => l.Id == id, ct);
@@ -80,6 +82,30 @@ public class LocationsController : ControllerBase
         location.Province = request.Province;
         location.CountryId = request.CountryId;
 
+        await _db.SaveChangesAsync(ct);
+        return NoContent();
+    }
+
+    [HttpPost("{id:guid}/deactivate")]
+    [Authorize(Policy = "location.master.manage")]
+    public async Task<IActionResult> Deactivate(Guid id, CancellationToken ct)
+    {
+        var location = await _db.Locations.FirstOrDefaultAsync(l => l.Id == id, ct);
+        if (location is null) return NotFound();
+
+        location.Active = false; // never a hard delete — §11.5
+        await _db.SaveChangesAsync(ct);
+        return NoContent();
+    }
+
+    [HttpPost("{id:guid}/reactivate")]
+    [Authorize(Policy = "location.master.manage")]
+    public async Task<IActionResult> Reactivate(Guid id, CancellationToken ct)
+    {
+        var location = await _db.Locations.FirstOrDefaultAsync(l => l.Id == id, ct);
+        if (location is null) return NotFound();
+
+        location.Active = true;
         await _db.SaveChangesAsync(ct);
         return NoContent();
     }

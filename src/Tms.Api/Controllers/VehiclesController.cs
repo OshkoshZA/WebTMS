@@ -54,6 +54,7 @@ public class VehiclesController : ControllerBase
     }
 
     [HttpPost]
+    [Authorize(Policy = "vehicle.master.manage")]
     public async Task<ActionResult<Vehicle>> Create(CreateVehicleRequest request, CancellationToken ct)
     {
         if (_tenantContext.TenantId is null || _tenantContext.CompanyId is null)
@@ -79,6 +80,7 @@ public class VehiclesController : ControllerBase
     }
 
     [HttpPut("{id:guid}")]
+    [Authorize(Policy = "vehicle.master.manage")]
     public async Task<IActionResult> Update(Guid id, UpdateVehicleRequest request, CancellationToken ct)
     {
         var vehicle = await _db.Vehicles.FirstOrDefaultAsync(v => v.Id == id, ct);
@@ -97,6 +99,7 @@ public class VehiclesController : ControllerBase
     }
 
     [HttpPost("{id:guid}/deactivate")]
+    [Authorize(Policy = "vehicle.master.manage")]
     public async Task<IActionResult> Deactivate(Guid id, CancellationToken ct)
     {
         var vehicle = await _db.Vehicles.FirstOrDefaultAsync(v => v.Id == id, ct);
@@ -109,6 +112,7 @@ public class VehiclesController : ControllerBase
 
     /// <summary>Reverses a Deactivate — the only path back to Active, mirroring how Deactivate is the only path out of it.</summary>
     [HttpPost("{id:guid}/reactivate")]
+    [Authorize(Policy = "vehicle.master.manage")]
     public async Task<IActionResult> Reactivate(Guid id, CancellationToken ct)
     {
         var vehicle = await _db.Vehicles.FirstOrDefaultAsync(v => v.Id == id, ct);

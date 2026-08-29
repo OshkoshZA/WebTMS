@@ -43,6 +43,7 @@ public class CostCentresController : ControllerBase
     }
 
     [HttpPost]
+    [Authorize(Policy = "costcentre.master.manage")]
     public async Task<ActionResult<CostCentre>> Create(CreateCostCentreRequest request, CancellationToken ct)
     {
         if (_tenantContext.TenantId is null || _tenantContext.CompanyId is null)
@@ -67,16 +68,36 @@ public class CostCentresController : ControllerBase
     }
 
     [HttpPut("{id:guid}")]
+    [Authorize(Policy = "costcentre.master.manage")]
     public async Task<IActionResult> Update(Guid id, UpdateCostCentreRequest request, CancellationToken ct)
     {
         var costCentre = await _db.CostCentres.FirstOrDefaultAsync(c => c.Id == id, ct);
         if (costCentre is null) return NotFound();
 
-        if (request.ParentCostCentreId == id)
-            return BadRequest("A cost centre cannot be its own parent.");
+        if (request.ParentCostCentreId is Guid parentId)
+        {
+            if (parentId == id)
+                return BadRequest("A cost centre cannot be its own parent.");
 
-        if (request.ParentCostCentreId is Guid parentId && !await _db.CostCentres.AnyAsync(c => c.Id == parentId, ct))
-            return NotFound($"Parent cost centre {parentId} was not found.");
+            var parent = await _db.CostCentres.FirstOrDefaultAsync(c => c.Id == parentId, ct);
+            if (parent is null) return NotFound($"Parent cost centre {parentId} was not found.");
+
+            // Walks the ancestry chain from the proposed parent upward — a direct
+            // self-reference is the shallow case above, but nothing stopped a
+            // multi-level cycle (A's parent is B, B's parent becomes A) before, which
+            // would spin a rollup report (§06) forever.
+            var visited = new HashSet<Guid> { id };
+            var current = parent;
+            while (current.ParentCostCentreId is Guid ancestorId)
+            {
+                if (ancestorId == id)
+                    return BadRequest("That would create a cycle in the cost centre hierarchy.");
+                if (!visited.Add(ancestorId))
+                    break; // an already-corrupt cycle elsewhere — not this call's to fix
+                current = await _db.CostCentres.FirstOrDefaultAsync(c => c.Id == ancestorId, ct);
+                if (current is null) break;
+            }
+        }
 
         costCentre.Code = request.Code;
         costCentre.Name = request.Name;
@@ -87,12 +108,25 @@ public class CostCentresController : ControllerBase
     }
 
     [HttpPost("{id:guid}/deactivate")]
+    [Authorize(Policy = "costcentre.master.manage")]
     public async Task<IActionResult> Deactivate(Guid id, CancellationToken ct)
     {
         var costCentre = await _db.CostCentres.FirstOrDefaultAsync(c => c.Id == id, ct);
         if (costCentre is null) return NotFound();
 
         costCentre.Active = false; // never a hard delete — §11.5
+        await _db.SaveChangesAsync(ct);
+        return NoContent();
+    }
+
+    [HttpPost("{id:guid}/reactivate")]
+    [Authorize(Policy = "costcentre.master.manage")]
+    public async Task<IActionResult> Reactivate(Guid id, CancellationToken ct)
+    {
+        var costCentre = await _db.CostCentres.FirstOrDefaultAsync(c => c.Id == id, ct);
+        if (costCentre is null) return NotFound();
+
+        costCentre.Active = true;
         await _db.SaveChangesAsync(ct);
         return NoContent();
     }

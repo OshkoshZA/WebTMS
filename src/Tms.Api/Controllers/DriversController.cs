@@ -52,6 +52,7 @@ public class DriversController : ControllerBase
     }
 
     [HttpPost]
+    [Authorize(Policy = "driver.master.manage")]
     public async Task<ActionResult<Driver>> Create(CreateDriverRequest request, CancellationToken ct)
     {
         if (_tenantContext.TenantId is null || _tenantContext.CompanyId is null)
@@ -79,6 +80,7 @@ public class DriversController : ControllerBase
     }
 
     [HttpPut("{id:guid}")]
+    [Authorize(Policy = "driver.master.manage")]
     public async Task<IActionResult> Update(Guid id, UpdateDriverRequest request, CancellationToken ct)
     {
         var driver = await _db.Drivers.FirstOrDefaultAsync(d => d.Id == id, ct);
@@ -111,6 +113,7 @@ public class DriversController : ControllerBase
     }
 
     [HttpPost("{id:guid}/deactivate")]
+    [Authorize(Policy = "driver.master.manage")]
     public async Task<IActionResult> Deactivate(Guid id, CancellationToken ct)
     {
         var driver = await _db.Drivers.FirstOrDefaultAsync(d => d.Id == id, ct);
@@ -123,6 +126,7 @@ public class DriversController : ControllerBase
 
     /// <summary>Reverses a Deactivate, back to Active — the only path out of Deactivated, mirroring how Deactivate is the only path in.</summary>
     [HttpPost("{id:guid}/reactivate")]
+    [Authorize(Policy = "driver.master.manage")]
     public async Task<IActionResult> Reactivate(Guid id, CancellationToken ct)
     {
         var driver = await _db.Drivers.FirstOrDefaultAsync(d => d.Id == id, ct);
