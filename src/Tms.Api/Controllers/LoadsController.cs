@@ -5,6 +5,7 @@ using Microsoft.EntityFrameworkCore;
 using Tms.Api.Services;
 using Tms.Infrastructure;
 using Tms.Modules.Audit;
+using Tms.Modules.Billing;
 using Tms.Modules.Loads;
 using Tms.Modules.Rating;
 using Tms.Shared;
@@ -30,6 +31,7 @@ public record AddCommodityLineRequest(
     decimal Quantity,
     Guid UnitOfMeasureId,
     decimal SellRatePerUnit,
+    decimal? BuyRatePerUnit = null,
     string? CreditOverrideReason = null);
 
 public record HoldLoadRequest(string Reason);
@@ -200,6 +202,7 @@ public class LoadsController : ControllerBase
 
         await RecomputeLoadStatusAsync(load, ct);
         await EnsureLoadConfirmationAsync(leg, ct);
+        await EnsureAccrualsForLegAsync(leg, ct);
         await _db.SaveChangesAsync(ct);
 
         return CreatedAtAction(nameof(Get), new { id = load.Id }, leg);
@@ -245,6 +248,7 @@ public class LoadsController : ControllerBase
 
         await RecomputeLoadStatusAsync(load, ct);
         await EnsureLoadConfirmationAsync(leg, ct);
+        await EnsureAccrualsForLegAsync(leg, ct);
         await _db.SaveChangesAsync(ct);
         return NoContent();
     }
@@ -361,6 +365,16 @@ public class LoadsController : ControllerBase
         if (!await _db.UnitsOfMeasure.AnyAsync(u => u.Id == request.UnitOfMeasureId, ct))
             return NotFound($"Unit of measure {request.UnitOfMeasureId} was not found.");
 
+        // A subcontracted leg's cost is rate-line-based, so every line needs its own
+        // buy rate to feed the accrual it raises (§8.1, §10.2); an own-fleet leg's buy
+        // cost is a standard per-vehicle-class cost-per-km/hour figure instead (§8.1) —
+        // no such cost table exists in this codebase yet, so there's nothing for a
+        // BuyRatePerUnit to mean there, and it's rejected rather than silently ignored.
+        if (leg.ExecutionType == LoadLegExecutionType.Subcontracted && request.BuyRatePerUnit is null)
+            return BadRequest("A commodity line on a Subcontracted leg must include a BuyRatePerUnit.");
+        if (leg.ExecutionType == LoadLegExecutionType.OwnFleet && request.BuyRatePerUnit is not null)
+            return BadRequest("An OwnFleet leg's commodity line cannot carry a BuyRatePerUnit.");
+
         var client = await _db.Clients.FirstOrDefaultAsync(c => c.Id == load.ClientId, ct);
         if (client is null) return NotFound($"Client {load.ClientId} was not found.");
 
@@ -397,6 +411,28 @@ public class LoadsController : ControllerBase
             Amount = sellAmount
         });
 
+        if (request.BuyRatePerUnit is decimal buyRatePerUnit)
+        {
+            var buyRateLine = new RateLine
+            {
+                TenantId = _tenantContext.TenantId.Value,
+                CompanyId = _tenantContext.CompanyId.Value,
+                SourceType = RateLineSourceType.CommodityLine,
+                SourceId = commodityLine.Id,
+                Direction = RateLineDirection.Buy,
+                RatePerUnit = buyRatePerUnit,
+                UnitOfMeasureId = request.UnitOfMeasureId,
+                Quantity = request.Quantity,
+                Amount = request.Quantity * buyRatePerUnit
+            };
+            _db.Set<RateLine>().Add(buyRateLine);
+
+            // Covers the case where this leg was already Allocated before this line was
+            // added; if it wasn't yet, EnsureAccrualsForLegAsync picks this line up later
+            // from AllocateLeg instead (both are idempotent per RateLineBuyId).
+            await EnsureAccrualAsync(leg, buyRateLine, ct);
+        }
+
         await _db.SaveChangesAsync(ct);
         await creditLock.CommitAsync(ct);
 
@@ -422,6 +458,54 @@ public class LoadsController : ControllerBase
             LoadLegId = leg.Id,
             SubcontractorId = leg.SubcontractorId.Value,
             DocumentNumber = $"LC{count + 1:D6}"
+        });
+    }
+
+    /// <summary>
+    /// Raises a SubcontractorAccrual for every buy RateLine already on this leg's
+    /// commodity lines that doesn't have one yet (§10.2) — the bulk counterpart to
+    /// EnsureAccrualAsync, for the moment a leg *becomes* Allocated (AddLeg/AllocateLeg),
+    /// when its commodity lines (and their buy rates) may already have been added
+    /// beforehand. A no-op the instant a leg is created, since it has no commodity
+    /// lines yet; real once AddCommodityLine has run first.
+    /// </summary>
+    private async Task EnsureAccrualsForLegAsync(LoadLeg leg, CancellationToken ct)
+    {
+        if (leg.ExecutionType != LoadLegExecutionType.Subcontracted || leg.SubcontractorId is null) return;
+        if (leg.Status != LoadLegStatus.Allocated) return;
+
+        var buyRateLines = await _db.Set<RateLine>()
+            .Where(r => r.Direction == RateLineDirection.Buy && r.SourceType == RateLineSourceType.CommodityLine)
+            .Join(_db.Set<CommodityLine>(), r => r.SourceId, cl => cl.Id, (r, cl) => new { r, cl })
+            .Where(x => x.cl.LoadLegId == leg.Id)
+            .Select(x => x.r)
+            .ToListAsync(ct);
+
+        foreach (var buyRateLine in buyRateLines)
+            await EnsureAccrualAsync(leg, buyRateLine, ct);
+    }
+
+    /// <summary>
+    /// Raises the SubcontractorAccrual for one buy RateLine the moment its leg is both
+    /// Subcontracted and Allocated (§5.2, §10.2) — the company's buy-side liability is
+    /// recognised here, at commitment, not weeks later when the subcontractor's own
+    /// invoice arrives (that's SupplierInvoice matching, a separate later step). Never
+    /// raised twice for the same RateLineBuyId.
+    /// </summary>
+    private async Task EnsureAccrualAsync(LoadLeg leg, RateLine buyRateLine, CancellationToken ct)
+    {
+        if (leg.ExecutionType != LoadLegExecutionType.Subcontracted || leg.SubcontractorId is null) return;
+        if (leg.Status != LoadLegStatus.Allocated) return;
+        if (await _db.Set<SubcontractorAccrual>().AnyAsync(a => a.RateLineBuyId == buyRateLine.Id, ct)) return;
+
+        _db.Set<SubcontractorAccrual>().Add(new SubcontractorAccrual
+        {
+            TenantId = leg.TenantId,
+            CompanyId = leg.CompanyId,
+            RateLineBuyId = buyRateLine.Id,
+            SubcontractorId = leg.SubcontractorId.Value,
+            AccrualDate = DateOnly.FromDateTime(DateTime.UtcNow),
+            EstimatedAmount = buyRateLine.Amount
         });
     }
 

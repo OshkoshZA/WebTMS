@@ -72,12 +72,15 @@ public class TmsDbContext : IdentityDbContext<ApplicationUser, ApplicationRole, 
     // Rating (§08)
     public DbSet<RateLine> RateLines => Set<RateLine>();
 
-    // Billing (§10.3 financial calendar, §10.1 Invoice/InvoiceLine; the rest of §10.1/§10.2 land in later phases)
+    // Billing (§10.3 financial calendar, §10.1 sell-side Invoice/InvoiceLine, §10.2 buy-side payables; credit notes (§10.1) land in a later phase)
     public DbSet<FinancialYear> FinancialYears => Set<FinancialYear>();
     public DbSet<FinancialPeriod> FinancialPeriods => Set<FinancialPeriod>();
     public DbSet<DebtorsAgingSnapshot> DebtorsAgingSnapshots => Set<DebtorsAgingSnapshot>();
     public DbSet<Invoice> Invoices => Set<Invoice>();
     public DbSet<InvoiceLine> InvoiceLines => Set<InvoiceLine>();
+    public DbSet<SubcontractorAccrual> SubcontractorAccruals => Set<SubcontractorAccrual>();
+    public DbSet<SupplierInvoice> SupplierInvoices => Set<SupplierInvoice>();
+    public DbSet<SubcontractorExpense> SubcontractorExpenses => Set<SubcontractorExpense>();
 
     // Privacy (§14)
     public DbSet<RetentionPolicy> RetentionPolicies => Set<RetentionPolicy>();
@@ -131,6 +134,25 @@ public class TmsDbContext : IdentityDbContext<ApplicationUser, ApplicationRole, 
         modelBuilder.Entity<InvoiceLine>().Property(l => l.Quantity).HasPrecision(18, 3);
         modelBuilder.Entity<InvoiceLine>().Property(l => l.Rate).HasPrecision(18, 4);
         modelBuilder.Entity<InvoiceLine>().Property(l => l.Amount).HasPrecision(18, 2);
+
+        modelBuilder.Entity<SupplierInvoice>()
+            .HasMany(si => si.Expenses)
+            .WithOne()
+            .HasForeignKey(e => e.SupplierInvoiceId);
+
+        // Duplicate-supplier-invoice protection: the same carrier can't have their own
+        // invoice number captured twice for the same Company. An app-layer AnyAsync
+        // check in SupplierInvoicesController.Create gives a clean 409 in the common
+        // case; this is the real guarantee under concurrent Create calls (same pattern
+        // as RoleNameIndex/UserNameIndex — see the comment above those).
+        modelBuilder.Entity<SupplierInvoice>()
+            .HasIndex(si => new { si.CompanyId, si.SubcontractorId, si.SupplierInvoiceNumber })
+            .IsUnique()
+            .HasDatabaseName("SupplierInvoiceNumberIndex");
+
+        modelBuilder.Entity<SubcontractorAccrual>().Property(a => a.EstimatedAmount).HasPrecision(18, 2);
+        modelBuilder.Entity<SupplierInvoice>().Property(si => si.Amount).HasPrecision(18, 2);
+        modelBuilder.Entity<SubcontractorExpense>().Property(e => e.Amount).HasPrecision(18, 2);
 
         ApplyTenancyScopeFilters(modelBuilder);
 

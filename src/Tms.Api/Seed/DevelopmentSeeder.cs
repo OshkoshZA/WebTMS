@@ -174,7 +174,9 @@ public static class DevelopmentSeeder
             ("finance.invoice.manage",
              "Generate, issue, and void sell-side invoices (§10.1)."),
             ("subcontractor.master.manage",
-             "Create, update, and deactivate Subcontractor master data, including banking details and payment terms (§5.1, §10.2).")
+             "Create, update, and deactivate Subcontractor master data, including banking details and payment terms (§5.1, §10.2)."),
+            ("finance.subcontractorinvoice.process",
+             "Capture a subcontractor's SupplierInvoice and match it against open accruals, finalizing the SubcontractorExpense (§10.2) — an AP function, since it recognises a payable.")
         };
 
         var adminRole = await roleManager.FindByNameAsync(AdminRoleName);
