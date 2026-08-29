@@ -1,3 +1,5 @@
+using System.Security.Cryptography;
+using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 using Tms.Infrastructure;
@@ -49,6 +51,75 @@ public static class DevelopmentSeeder
         if (isFirstRun)
         {
             await SeedAdminUserAsync(scope.ServiceProvider, db, tenant!, company!, roleManager, logger);
+        }
+
+        var dataProtectionProvider = scope.ServiceProvider.GetRequiredService<IDataProtectionProvider>();
+        await EncryptLegacyPlaintextBankingDetailsAsync(db, dataProtectionProvider, logger);
+    }
+
+    /// <summary>
+    /// One-time fix-up, dev-environment only: BankingDetails on Company (always seeded)
+    /// and Subcontractor (set ad hoc during earlier live testing this project has gone
+    /// through) were both written as plain text before field-level encryption existed
+    /// (§14.5). Runs every startup but is cheap and self-limiting — a value that
+    /// already round-trips through Unprotect cleanly is left untouched, so each table
+    /// only ever gets real work done on it once. Reads/writes the raw column via ADO.NET
+    /// rather than through TmsDbContext's own encrypting value converter, deliberately —
+    /// going through the converter would try to Unprotect a legacy plaintext value on
+    /// simple materialization and throw before this method ever got a chance to fix it.
+    /// A real production rollout of encryption onto an existing dataset needs exactly
+    /// this kind of one-time re-encryption pass, just as a proper migration/admin tool
+    /// rather than app-startup code confined to two known tables/fields.
+    /// </summary>
+    private static async Task EncryptLegacyPlaintextBankingDetailsAsync(TmsDbContext db, IDataProtectionProvider dataProtectionProvider, ILogger logger)
+    {
+        var protector = dataProtectionProvider.CreateProtector("Tms.BankingDetails.v1");
+
+        var connection = db.Database.GetDbConnection();
+        if (connection.State != System.Data.ConnectionState.Open) await connection.OpenAsync();
+
+        await EncryptLegacyPlaintextColumnAsync(connection, protector, "Companies", logger);
+        await EncryptLegacyPlaintextColumnAsync(connection, protector, "Subcontractors", logger);
+    }
+
+    private static async Task EncryptLegacyPlaintextColumnAsync(
+        System.Data.Common.DbConnection connection, IDataProtector protector, string tableName, ILogger logger)
+    {
+        var pending = new List<(Guid Id, string Raw)>();
+        await using (var selectCommand = connection.CreateCommand())
+        {
+            selectCommand.CommandText = $"SELECT Id, BankingDetails FROM {tableName} WHERE BankingDetails IS NOT NULL";
+            await using var reader = await selectCommand.ExecuteReaderAsync();
+            while (await reader.ReadAsync())
+                pending.Add((reader.GetGuid(0), reader.GetString(1)));
+        }
+
+        foreach (var (id, raw) in pending)
+        {
+            try
+            {
+                protector.Unprotect(raw); // already encrypted — nothing to do
+            }
+            catch (CryptographicException)
+            {
+                var encrypted = protector.Protect(raw);
+
+                await using var updateCommand = connection.CreateCommand();
+                updateCommand.CommandText = $"UPDATE {tableName} SET BankingDetails = @value WHERE Id = @id";
+
+                var valueParam = updateCommand.CreateParameter();
+                valueParam.ParameterName = "@value";
+                valueParam.Value = encrypted;
+                updateCommand.Parameters.Add(valueParam);
+
+                var idParam = updateCommand.CreateParameter();
+                idParam.ParameterName = "@id";
+                idParam.Value = id;
+                updateCommand.Parameters.Add(idParam);
+
+                await updateCommand.ExecuteNonQueryAsync();
+                logger.LogInformation("Encrypted legacy plaintext BankingDetails for {Table} {Id}.", tableName, id);
+            }
         }
     }
 

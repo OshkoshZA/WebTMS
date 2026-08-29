@@ -5,6 +5,7 @@ using Asp.Versioning;
 using Asp.Versioning.ApiExplorer;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.EntityFrameworkCore;
@@ -36,6 +37,14 @@ builder.Services.AddDbContext<TmsDbContext>((sp, options) =>
     options.UseSqlServer(builder.Configuration.GetConnectionString("Default"));
     options.AddInterceptors(sp.GetRequiredService<AuditSaveChangesInterceptor>());
 });
+
+// --- Field-level encryption for banking/PII (§12, §14.5) — the key ring persists to
+// the same database as the data it protects (see TmsDbContext.DataProtectionKeys),
+// so it survives restarts/redeploys and multiple instances the way a per-machine
+// filesystem folder wouldn't. ---
+builder.Services.AddDataProtection()
+    .PersistKeysToDbContext<TmsDbContext>()
+    .SetApplicationName("Tms");
 
 // --- Identity (§07) ---
 builder.Services

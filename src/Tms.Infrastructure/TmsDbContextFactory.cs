@@ -1,3 +1,4 @@
+using Microsoft.AspNetCore.DataProtection;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Design;
 using Microsoft.Extensions.Configuration;
@@ -29,7 +30,10 @@ public class TmsDbContextFactory : IDesignTimeDbContextFactory<TmsDbContext>
         var optionsBuilder = new DbContextOptionsBuilder<TmsDbContext>();
         optionsBuilder.UseSqlServer(connectionString);
 
-        return new TmsDbContext(optionsBuilder.Options, new DesignTimeTenantContext());
+        // Migrations diff the schema; they never actually protect/unprotect a real
+        // value, so an in-memory, never-persisted key ring (§14.5) is all this needs —
+        // real key persistence only matters for the running app (Tms.Api's Program.cs).
+        return new TmsDbContext(optionsBuilder.Options, new DesignTimeTenantContext(), new EphemeralDataProtectionProvider());
     }
 
     private sealed class DesignTimeTenantContext : ITenantContext

@@ -1,6 +1,9 @@
 using System.Reflection;
+using Microsoft.AspNetCore.DataProtection;
+using Microsoft.AspNetCore.DataProtection.EntityFrameworkCore;
 using Microsoft.AspNetCore.Identity.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Tms.Modules.Audit;
 using Tms.Modules.Billing;
 using Tms.Modules.Fleet;
@@ -19,16 +22,41 @@ namespace Tms.Infrastructure;
 /// and <see cref="CurrentCompanyId"/> — properties EF Core re-evaluates against
 /// whichever DbContext instance is actually running a given query, so a filter
 /// defined once at model-build time still reflects the live request's tenant.
+///
+/// Also implements <see cref="IDataProtectionKeyContext"/> for field-level encryption
+/// (§12/§14.5) — see the doc comment on <see cref="DataProtectionKeys"/>.
 /// </summary>
-public class TmsDbContext : IdentityDbContext<ApplicationUser, ApplicationRole, Guid>
+public class TmsDbContext : IdentityDbContext<ApplicationUser, ApplicationRole, Guid>, IDataProtectionKeyContext
 {
     private readonly ITenantContext _tenantContext;
+    private readonly IDataProtector _bankingProtector;
 
-    public TmsDbContext(DbContextOptions<TmsDbContext> options, ITenantContext tenantContext)
+    public TmsDbContext(DbContextOptions<TmsDbContext> options, ITenantContext tenantContext, IDataProtectionProvider dataProtectionProvider)
         : base(options)
     {
         _tenantContext = tenantContext;
+
+        // A versioned purpose string (§14.5) — Data Protection derives a
+        // cryptographically independent key per distinct purpose from the same key
+        // ring, so a future second protected field (or a deliberate re-key to "v2")
+        // can never cross-contaminate with this one.
+        _bankingProtector = dataProtectionProvider.CreateProtector("Tms.BankingDetails.v1");
     }
+
+    /// <summary>
+    /// Backs ASP.NET Core Data Protection's PersistKeysToDbContext (Tms.Api's
+    /// Program.cs) — the key ring lives in this same database, sharing its
+    /// backup/restore durability story (§15), rather than a per-machine filesystem
+    /// folder that wouldn't survive a redeploy or a second app instance. On this
+    /// Windows dev box the key ring is encrypted at rest via DPAPI — ASP.NET Core's
+    /// automatic default when no explicit key-protection is configured. A real
+    /// deployment still needs an explicit .ProtectKeysWithAzureKeyVault(...) or
+    /// equivalent so the key ring itself is wrapped by a real KMS-held key rather than
+    /// OS-level protection tied to one machine — the one piece of this still not
+    /// production-real, the same "structurally correct now, real once it exists"
+    /// pattern as CreditExposureService's AR Outstanding was before Billing existed.
+    /// </summary>
+    public DbSet<DataProtectionKey> DataProtectionKeys => Set<DataProtectionKey>();
 
     // Exposed for the global query filters below — re-read from the injected,
     // request-scoped ITenantContext every time this DbContext instance is asked.
@@ -96,6 +124,21 @@ public class TmsDbContext : IdentityDbContext<ApplicationUser, ApplicationRole, 
 
         modelBuilder.Entity<RoleFunction>()
             .HasKey(rf => new { rf.RoleId, rf.FunctionId });
+
+        // Field-level encryption for banking/PII (§12, §14.5) — transparent to every
+        // caller: EF Core encrypts on write and decrypts on read via these converters,
+        // so no controller or service needs to know BankingDetails is ciphertext at
+        // rest. nvarchar(max) already backs both columns, so ciphertext's larger size
+        // than plaintext needed no migration of the column itself.
+        var bankingDetailsConverter = new ValueConverter<string, string>(
+            plaintext => _bankingProtector.Protect(plaintext),
+            ciphertext => _bankingProtector.Unprotect(ciphertext));
+        var nullableBankingDetailsConverter = new ValueConverter<string?, string?>(
+            plaintext => plaintext == null ? null : _bankingProtector.Protect(plaintext),
+            ciphertext => ciphertext == null ? null : _bankingProtector.Unprotect(ciphertext));
+
+        modelBuilder.Entity<Company>().Property(c => c.BankingDetails).HasConversion(bankingDetailsConverter);
+        modelBuilder.Entity<Subcontractor>().Property(s => s.BankingDetails).HasConversion(nullableBankingDetailsConverter);
 
         modelBuilder.Entity<Client>().Property(c => c.CreditLimit).HasPrecision(18, 2);
         modelBuilder.Entity<CommodityLine>().Property(c => c.Quantity).HasPrecision(18, 3);
