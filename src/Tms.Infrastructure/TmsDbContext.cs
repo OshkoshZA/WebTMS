@@ -6,6 +6,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Tms.Modules.Audit;
 using Tms.Modules.Billing;
+using Tms.Modules.Debrief;
 using Tms.Modules.Fleet;
 using Tms.Modules.Identity;
 using Tms.Modules.Loads;
@@ -101,6 +102,12 @@ public class TmsDbContext : IdentityDbContext<ApplicationUser, ApplicationRole, 
 
     // Rating (§08)
     public DbSet<RateLine> RateLines => Set<RateLine>();
+
+    // Debrief (§09, §9.1)
+    public DbSet<Modules.Debrief.Debrief> Debriefs => Set<Modules.Debrief.Debrief>();
+    public DbSet<DebriefIncident> DebriefIncidents => Set<DebriefIncident>();
+    public DbSet<ExpenseType> ExpenseTypes => Set<ExpenseType>();
+    public DbSet<DebriefExpense> DebriefExpenses => Set<DebriefExpense>();
 
     // Billing (§10.3 financial calendar, §10.1 sell-side Invoice/InvoiceLine, §10.2 buy-side payables; credit notes (§10.1) land in a later phase)
     public DbSet<FinancialYear> FinancialYears => Set<FinancialYear>();
@@ -252,6 +259,29 @@ public class TmsDbContext : IdentityDbContext<ApplicationUser, ApplicationRole, 
             .HasIndex(a => a.RateLineBuyId)
             .IsUnique()
             .HasDatabaseName("SubcontractorAccrualRateLineIndex");
+
+        // A leg gets at most one Debrief — never resubmitted, only ever approved once
+        // (§09).
+        modelBuilder.Entity<Modules.Debrief.Debrief>()
+            .HasIndex(d => d.LoadLegId)
+            .IsUnique()
+            .HasDatabaseName("DebriefLoadLegIndex");
+
+        modelBuilder.Entity<Modules.Debrief.Debrief>()
+            .HasMany(d => d.Incidents)
+            .WithOne()
+            .HasForeignKey(i => i.DebriefId);
+        modelBuilder.Entity<Modules.Debrief.Debrief>()
+            .HasMany(d => d.Expenses)
+            .WithOne()
+            .HasForeignKey(e => e.DebriefId);
+
+        modelBuilder.Entity<Modules.Debrief.Debrief>().Property(d => d.OdometerStart).HasPrecision(18, 2);
+        modelBuilder.Entity<Modules.Debrief.Debrief>().Property(d => d.OdometerEnd).HasPrecision(18, 2);
+        modelBuilder.Entity<Modules.Debrief.Debrief>().Property(d => d.FuelLitres).HasPrecision(18, 2);
+        modelBuilder.Entity<Modules.Debrief.Debrief>().Property(d => d.FuelCost).HasPrecision(18, 2);
+        modelBuilder.Entity<Modules.Debrief.Debrief>().Property(d => d.DrivingHours).HasPrecision(18, 2);
+        modelBuilder.Entity<DebriefExpense>().Property(e => e.Amount).HasPrecision(18, 2);
 
         ApplyTenancyScopeFilters(modelBuilder);
 

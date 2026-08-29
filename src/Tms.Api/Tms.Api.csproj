@@ -17,6 +17,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\Tms.Infrastructure\Tms.Infrastructure.csproj" />
+    <ProjectReference Include="..\Tms.Modules.Debrief\Tms.Modules.Debrief.csproj" />
     <ProjectReference Include="..\Tms.Modules.Identity\Tms.Modules.Identity.csproj" />
     <ProjectReference Include="..\Tms.Modules.Loads\Tms.Modules.Loads.csproj" />
     <ProjectReference Include="..\Tms.Modules.Fleet\Tms.Modules.Fleet.csproj" />

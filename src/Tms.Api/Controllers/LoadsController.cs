@@ -44,14 +44,14 @@ public record LoadTrackingResponse(Guid LoadId, LoadStatus Status, IReadOnlyList
 
 /// <summary>
 /// Load capture, the leg-based status lifecycle, and the credit-limit hard stop
-/// (docs/architecture.html §5.1, §5.2, §5.4). AR Outstanding is still zero — see
-/// the TODO in CreditExposureService — so today's check is WIP-only; it becomes
-/// exact the moment Tms.Modules.Billing exists, with no change needed here.
+/// (docs/architecture.html §5.1, §5.2, §5.4).
 ///
-/// The lifecycle stops short of PodReceived/Invoiced/Closed: those depend on
-/// Debrief and Billing (Phase 2/3), which don't exist yet. Booked → Allocated →
-/// InTransit → Delivered, plus the On Hold and Cancelled exception branches, are
-/// fully wired; the rest picks up once those modules land.
+/// PodReceived is reached only once every leg's Debrief is Approved (§09) — a leg
+/// never sets that status directly, only LegsController.SubmitDebrief/
+/// DebriefsController.Approve do, via LoadStatusService's shared rollup. The
+/// lifecycle still stops short of Invoiced/Closed: those depend on tracking whether
+/// every commodity line for a load has actually been invoiced/expensed, which
+/// doesn't exist yet.
 /// </summary>
 [ApiController]
 [ApiVersion("1.0")]
@@ -63,6 +63,7 @@ public class LoadsController : ControllerBase
     private readonly ITenantContext _tenantContext;
     private readonly ICurrentUserAccessor _currentUser;
     private readonly CreditExposureService _creditExposure;
+    private readonly LoadStatusService _loadStatus;
     private readonly IAuthorizationService _authorizationService;
 
     public LoadsController(
@@ -70,6 +71,7 @@ public class LoadsController : ControllerBase
         ITenantContext tenantContext,
         ICurrentUserAccessor currentUser,
         CreditExposureService creditExposure,
+        LoadStatusService loadStatus,
         IAuthorizationService authorizationService)
     {
         _db = db;
@@ -77,6 +79,7 @@ public class LoadsController : ControllerBase
         _authorizationService = authorizationService;
         _currentUser = currentUser;
         _creditExposure = creditExposure;
+        _loadStatus = loadStatus;
     }
 
     [HttpGet]
@@ -215,7 +218,7 @@ public class LoadsController : ControllerBase
         _db.LoadLegs.Add(leg);
         load.Legs.Add(leg);
 
-        await RecomputeLoadStatusAsync(load, ct);
+        await _loadStatus.RecomputeAsync(load, ct);
         await EnsureLoadConfirmationAsync(leg, ct);
         await EnsureAccrualsForLegAsync(leg, ct);
         await _db.SaveChangesAsync(ct);
@@ -293,7 +296,7 @@ public class LoadsController : ControllerBase
 
         leg.Status = LoadLegStatus.Allocated;
 
-        await RecomputeLoadStatusAsync(load, ct);
+        await _loadStatus.RecomputeAsync(load, ct);
         await EnsureLoadConfirmationAsync(leg, ct);
         await EnsureAccrualsForLegAsync(leg, ct);
         await _db.SaveChangesAsync(ct);
@@ -317,7 +320,7 @@ public class LoadsController : ControllerBase
 
         leg.Status = LoadLegStatus.InTransit;
 
-        await RecomputeLoadStatusAsync(load, ct);
+        await _loadStatus.RecomputeAsync(load, ct);
         await _db.SaveChangesAsync(ct);
         return NoContent();
     }
@@ -336,7 +339,7 @@ public class LoadsController : ControllerBase
 
         leg.Status = LoadLegStatus.Delivered;
 
-        await RecomputeLoadStatusAsync(load, ct);
+        await _loadStatus.RecomputeAsync(load, ct);
         await _db.SaveChangesAsync(ct);
         return NoContent();
     }
@@ -350,7 +353,7 @@ public class LoadsController : ControllerBase
         if (load.Status != LoadStatus.InTransit)
             return Conflict($"Load is {load.Status}; only a load In Transit can be put On Hold.");
 
-        await TransitionLoadStatusAsync(load, LoadStatus.OnHold, request.Reason, ct);
+        await _loadStatus.TransitionAsync(load, LoadStatus.OnHold, request.Reason, ct);
         await _db.SaveChangesAsync(ct);
         return NoContent();
     }
@@ -370,8 +373,8 @@ public class LoadsController : ControllerBase
         if (load.Status != LoadStatus.OnHold)
             return Conflict($"Load is {load.Status}, not On Hold.");
 
-        var next = ComputeStatusFromLegs(load.Legs);
-        await TransitionLoadStatusAsync(load, next, reason: null, ct);
+        var next = LoadStatusService.ComputeStatusFromLegs(load.Legs);
+        await _loadStatus.TransitionAsync(load, next, reason: null, ct);
         await _db.SaveChangesAsync(ct);
         return NoContent();
     }
@@ -385,7 +388,7 @@ public class LoadsController : ControllerBase
         if (load.Status != LoadStatus.Booked && load.Status != LoadStatus.Allocated)
             return Conflict($"Load is {load.Status}; only Booked or Allocated loads can be cancelled.");
 
-        await TransitionLoadStatusAsync(load, LoadStatus.Cancelled, reason: null, ct);
+        await _loadStatus.TransitionAsync(load, LoadStatus.Cancelled, reason: null, ct);
         await _db.SaveChangesAsync(ct);
         return NoContent();
     }
@@ -644,46 +647,6 @@ public class LoadsController : ControllerBase
         }
 
         return transaction;
-    }
-
-    /// <summary>
-    /// Recomputes Load.Status from its legs' individual statuses and, if it changed,
-    /// records the transition (§5.2). Never touches On Hold or Cancelled — those are
-    /// exception states only a manual action (Hold/ReleaseHold/Cancel) can enter or leave.
-    /// </summary>
-    private async Task RecomputeLoadStatusAsync(Load load, CancellationToken ct)
-    {
-        if (load.Status is LoadStatus.OnHold or LoadStatus.Cancelled)
-            return;
-
-        var next = ComputeStatusFromLegs(load.Legs);
-        if (next != load.Status)
-            await TransitionLoadStatusAsync(load, next, reason: null, ct);
-    }
-
-    /// <summary>Pure leg-status rollup (§5.2) — shared by RecomputeLoadStatusAsync and ReleaseHold, which need the same answer but at different points relative to the On-Hold guard.</summary>
-    private static LoadStatus ComputeStatusFromLegs(IReadOnlyCollection<LoadLeg> legs) =>
-        legs.Count == 0
-            ? LoadStatus.Booked
-            : legs.All(l => l.Status == LoadLegStatus.Delivered) ? LoadStatus.Delivered
-            : legs.Any(l => l.Status is LoadLegStatus.InTransit or LoadLegStatus.Delivered) ? LoadStatus.InTransit
-            : legs.All(l => l.Status == LoadLegStatus.Allocated) ? LoadStatus.Allocated
-            : LoadStatus.Booked;
-
-    private Task TransitionLoadStatusAsync(Load load, LoadStatus next, string? reason, CancellationToken ct)
-    {
-        _db.LoadStatusHistories.Add(new LoadStatusHistory
-        {
-            TenantId = load.TenantId,
-            CompanyId = load.CompanyId,
-            LoadId = load.Id,
-            FromStatus = load.Status,
-            ToStatus = next,
-            ChangedByUserId = _currentUser.UserId ?? Guid.Empty,
-            Reason = reason
-        });
-        load.Status = next;
-        return Task.CompletedTask;
     }
 
     /// <summary>

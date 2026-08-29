@@ -261,7 +261,11 @@ public static class DevelopmentSeeder
             ("costcentre.master.manage",
              "Create, update, deactivate, and reactivate CostCentre master data, including its parent hierarchy (§06)."),
             ("commodity.master.manage",
-             "Create, update, deactivate, and reactivate Commodity master data (§5.5).")
+             "Create, update, deactivate, and reactivate Commodity master data (§5.5)."),
+            ("debrief.approve",
+             "Resolve a PendingReview Debrief — a Debrief Clerk function, distinct from submitting one, which any authenticated user (or driver mobile web) can do (§09)."),
+            ("expensetype.master.manage",
+             "Create, update, deactivate, and reactivate ExpenseType master data (§9.1).")
         };
 
         var adminRole = await roleManager.FindByNameAsync(AdminRoleName);

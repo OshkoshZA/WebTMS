@@ -23,10 +23,11 @@ public record InvoiceResponse(
 /// <summary>
 /// Sell-side invoicing (docs/architecture.html §10.1) — one line per approved commodity
 /// line, in the Client's fixed currency, posted against the Company's current open
-/// FinancialPeriod (§10.3). Debrief approval doesn't exist yet (§09, a later phase), so
-/// Generate aggregates a client's unbilled sell RateLines from Delivered loads instead —
-/// the closest already-implemented stand-in for "ready to bill." "Overdue" isn't a
-/// stored status; it's derived from DueDate, same as the doc describes.
+/// FinancialPeriod (§10.3). Generate aggregates a client's unbilled sell RateLines from
+/// PodReceived loads (§5.2, §09) — a load only reaches that status once every leg's
+/// Debrief is Approved, the real "ready to bill" gate the doc describes, no longer the
+/// Delivered stand-in used before Debrief existed. "Overdue" isn't a stored status;
+/// it's derived from DueDate, same as the doc describes.
 /// </summary>
 [ApiController]
 [ApiVersion("1.0")]
@@ -87,12 +88,12 @@ public class InvoicesController : ControllerBase
             .Join(_db.Set<CommodityLine>(), r => r.SourceId, cl => cl.Id, (r, cl) => new { r, cl })
             .Join(_db.Set<LoadLeg>(), x => x.cl.LoadLegId, leg => leg.Id, (x, leg) => new { x.r, x.cl, leg })
             .Join(_db.Loads, x => x.leg.LoadId, load => load.Id, (x, load) => new { x.r, x.cl, load })
-            .Where(x => x.load.ClientId == request.ClientId && x.load.Status == LoadStatus.Delivered)
+            .Where(x => x.load.ClientId == request.ClientId && x.load.Status == LoadStatus.PodReceived)
             .Select(x => new { x.r, x.cl })
             .ToListAsync(ct);
 
         if (candidates.Count == 0)
-            return Conflict("No unbilled, Delivered sell lines found for this client in that currency.");
+            return Conflict("No unbilled, PodReceived sell lines found for this client in that currency.");
 
         var commodityIds = candidates.Select(x => x.cl.CommodityId).Distinct().ToList();
         var commodityNames = await _db.Commodities

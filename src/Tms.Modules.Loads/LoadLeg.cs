@@ -19,7 +19,10 @@ public enum LoadLegStatus
     Planned,
     Allocated,
     InTransit,
-    Delivered
+    Delivered,
+
+    // Reached only once this leg's Debrief is Approved (§09) — never set directly.
+    PodReceived
 }
 
 /// <summary>
