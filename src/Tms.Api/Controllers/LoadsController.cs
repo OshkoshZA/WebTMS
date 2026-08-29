@@ -1,7 +1,9 @@
+using System.Data;
 using Asp.Versioning;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Storage;
 using Tms.Api.Services;
 using Tms.Infrastructure;
 using Tms.Modules.Audit;
@@ -89,6 +91,8 @@ public class LoadsController : ControllerBase
 
         var client = await _db.Clients.FirstOrDefaultAsync(c => c.Id == request.ClientId, ct);
         if (client is null) return NotFound($"Client {request.ClientId} was not found.");
+        if (client.Status == ClientStatus.Deactivated)
+            return Conflict($"Client '{client.Name}' is deactivated; reactivate it before booking a new load.");
 
         if (!await _db.LoadTypes.AnyAsync(lt => lt.Id == request.LoadTypeId, ct))
             return NotFound($"Load type {request.LoadTypeId} was not found.");
@@ -155,8 +159,8 @@ public class LoadsController : ControllerBase
 
         var load = await _db.Loads.Include(l => l.Legs).FirstOrDefaultAsync(l => l.Id == id, ct);
         if (load is null) return NotFound();
-        if (load.Status == LoadStatus.OnHold)
-            return Conflict("Load is On Hold; release it before adding further legs.");
+        if (load.Status is LoadStatus.OnHold or LoadStatus.Cancelled)
+            return Conflict($"Load is {load.Status}; no further legs can be added.");
 
         if (!await _db.Locations.AnyAsync(l => l.Id == request.OriginLocationId, ct))
             return NotFound($"Location {request.OriginLocationId} (origin) was not found.");
@@ -177,8 +181,13 @@ public class LoadsController : ControllerBase
             return NotFound($"Vehicle {vehicleId} was not found.");
         if (request.DriverId is Guid driverId && !await _db.Drivers.AnyAsync(d => d.Id == driverId, ct))
             return NotFound($"Driver {driverId} was not found.");
-        if (request.SubcontractorId is Guid subcontractorId && !await _db.Subcontractors.AnyAsync(s => s.Id == subcontractorId, ct))
-            return NotFound($"Subcontractor {subcontractorId} was not found.");
+        if (request.SubcontractorId is Guid subcontractorId)
+        {
+            var requestedSubcontractor = await _db.Subcontractors.FirstOrDefaultAsync(s => s.Id == subcontractorId, ct);
+            if (requestedSubcontractor is null) return NotFound($"Subcontractor {subcontractorId} was not found.");
+            if (requestedSubcontractor.Status == SubcontractorStatus.Deactivated)
+                return Conflict($"Subcontractor '{requestedSubcontractor.Name}' is deactivated; it cannot be allocated to a new leg.");
+        }
 
         // Reaching Allocated (§5.2, §8.2) means different things depending on how the
         // leg is resourced: Vehicle+Driver for OwnFleet, a Subcontractor assignment for
@@ -218,6 +227,16 @@ public class LoadsController : ControllerBase
     [HttpPost("{id:guid}/legs/{legId:guid}/allocate")]
     public async Task<IActionResult> AllocateLeg(Guid id, Guid legId, AllocateLoadLegRequest request, CancellationToken ct)
     {
+        // Acquired before the very first read of this leg's row (§5.2, §8.2, §10.2):
+        // two concurrent Allocate calls for the same Planned leg could otherwise both
+        // pass every check below before either commits — a duplicate LoadConfirmation
+        // or SubcontractorAccrual, or the leg's own resource assignment landing on
+        // whichever request happened to commit last. Fetching load/leg only after the
+        // lock is held (rather than before, like CreditExposureService's lock) matters
+        // here specifically because the racy state being read — leg.Status — lives on
+        // the row itself, not a separately-recomputed aggregate.
+        await using var legLock = await BeginLegLockAsync(legId, ct);
+
         var load = await _db.Loads.Include(l => l.Legs).FirstOrDefaultAsync(l => l.Id == id, ct);
         if (load is null) return NotFound();
 
@@ -225,8 +244,8 @@ public class LoadsController : ControllerBase
         if (leg is null) return NotFound($"Leg {legId} was not found on load {id}.");
         if (leg.Status != LoadLegStatus.Planned)
             return Conflict($"Leg is {leg.Status}; only a Planned leg can be allocated.");
-        if (load.Status == LoadStatus.OnHold)
-            return Conflict("Load is On Hold; release it before allocating further legs.");
+        if (load.Status is LoadStatus.OnHold or LoadStatus.Cancelled)
+            return Conflict($"Load is {load.Status}; no further legs can be allocated.");
 
         if (leg.ExecutionType == LoadLegExecutionType.Subcontracted)
         {
@@ -235,6 +254,8 @@ public class LoadsController : ControllerBase
 
             var subcontractor = await _db.Subcontractors.FirstOrDefaultAsync(s => s.Id == request.SubcontractorId, ct);
             if (subcontractor is null) return NotFound($"Subcontractor {request.SubcontractorId} was not found.");
+            if (subcontractor.Status == SubcontractorStatus.Deactivated)
+                return Conflict($"Subcontractor '{subcontractor.Name}' is deactivated; it cannot be allocated to a new leg.");
 
             // A commodity line's buy rate can be added before this leg has a
             // subcontractor assigned (no allow-list to check against yet — see
@@ -276,6 +297,7 @@ public class LoadsController : ControllerBase
         await EnsureLoadConfirmationAsync(leg, ct);
         await EnsureAccrualsForLegAsync(leg, ct);
         await _db.SaveChangesAsync(ct);
+        await legLock.CommitAsync(ct);
         return NoContent();
     }
 
@@ -290,8 +312,8 @@ public class LoadsController : ControllerBase
         if (leg is null) return NotFound($"Leg {legId} was not found on load {id}.");
         if (leg.Status != LoadLegStatus.Allocated)
             return Conflict($"Leg is {leg.Status}; only an Allocated leg can start.");
-        if (load.Status == LoadStatus.OnHold)
-            return Conflict("Load is On Hold; release it before starting any further legs.");
+        if (load.Status is LoadStatus.OnHold or LoadStatus.Cancelled)
+            return Conflict($"Load is {load.Status}; no further legs can start.");
 
         leg.Status = LoadLegStatus.InTransit;
 
@@ -381,6 +403,8 @@ public class LoadsController : ControllerBase
 
         var load = await _db.Loads.FirstOrDefaultAsync(l => l.Id == id, ct);
         if (load is null) return NotFound($"Load {id} was not found.");
+        if (load.Status is LoadStatus.OnHold or LoadStatus.Cancelled)
+            return Conflict($"Load is {load.Status}; no further commodity lines can be added.");
 
         var leg = await _db.LoadLegs.FirstOrDefaultAsync(l => l.Id == legId && l.LoadId == id, ct);
         if (leg is null) return NotFound($"Leg {legId} was not found on load {id}.");
@@ -426,6 +450,8 @@ public class LoadsController : ControllerBase
             }
             else if (request.BuyCurrencyId is Guid explicitBuyCurrencyId)
             {
+                if (!await _db.Currencies.AnyAsync(c => c.Id == explicitBuyCurrencyId, ct))
+                    return NotFound($"Currency {explicitBuyCurrencyId} was not found.");
                 buyCurrencyId = explicitBuyCurrencyId;
             }
             else
@@ -572,6 +598,53 @@ public class LoadsController : ControllerBase
     private async Task<bool> IsSubcontractorCurrencyAllowedAsync(Tms.Modules.Loads.Subcontractor subcontractor, Guid currencyId, CancellationToken ct) =>
         currencyId == subcontractor.CurrencyId
         || await _db.Set<SubcontractorCurrency>().AnyAsync(sc => sc.SubcontractorId == subcontractor.Id && sc.CurrencyId == currencyId, ct);
+
+    /// <summary>
+    /// Holds an exclusive, transaction-scoped SQL Server application lock on one leg —
+    /// the same sp_getapplock mechanism as CreditExposureService.BeginCreditLockAsync
+    /// (§5.4), just keyed on a leg instead of a client. AllocateLeg is the only caller:
+    /// it acquires this before its very first read of the leg's row, so a second
+    /// concurrent Allocate call for the same leg blocks here until the first commits
+    /// or rolls back, then sees whatever state that left behind — never a race where
+    /// both read Planned before either writes Allocated.
+    /// </summary>
+    private async Task<IDbContextTransaction> BeginLegLockAsync(Guid legId, CancellationToken ct)
+    {
+        var transaction = await _db.Database.BeginTransactionAsync(ct);
+
+        var connection = _db.Database.GetDbConnection();
+        await using var command = connection.CreateCommand();
+        command.CommandText = "sp_getapplock";
+        command.CommandType = CommandType.StoredProcedure;
+        command.Transaction = transaction.GetDbTransaction();
+
+        void AddParam(string name, object value, ParameterDirection direction = ParameterDirection.Input)
+        {
+            var parameter = command.CreateParameter();
+            parameter.ParameterName = name;
+            parameter.Value = value;
+            parameter.Direction = direction;
+            command.Parameters.Add(parameter);
+        }
+
+        AddParam("@Resource", $"leg:{legId}");
+        AddParam("@LockMode", "Exclusive");
+        AddParam("@LockOwner", "Transaction");
+        AddParam("@LockTimeout", 10000);
+        AddParam("@ReturnValue", 0, ParameterDirection.ReturnValue);
+
+        await command.ExecuteNonQueryAsync(ct);
+
+        var lockResult = (int)command.Parameters["@ReturnValue"].Value!;
+        if (lockResult < 0)
+        {
+            await transaction.RollbackAsync(ct);
+            throw new InvalidOperationException(
+                $"Could not acquire the leg lock for {legId} (sp_getapplock returned {lockResult}).");
+        }
+
+        return transaction;
+    }
 
     /// <summary>
     /// Recomputes Load.Status from its legs' individual statuses and, if it changed,

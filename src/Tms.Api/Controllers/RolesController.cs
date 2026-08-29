@@ -122,6 +122,24 @@ public class RolesController : ControllerBase
         var grant = await _db.RoleFunctions.FirstOrDefaultAsync(rf => rf.RoleId == id && rf.FunctionId == functionId, ct);
         if (grant is null) return NotFound();
 
+        // Revoking identity.role.manage itself needs a last-holder check — unlike
+        // every other function, losing this one has no recovery path through the API:
+        // nobody left could grant it back. Every other function is comparatively
+        // recoverable (identity.user.manage could reassign roles; this is the one
+        // capability that grants itself).
+        var function = await _db.Functions.FirstOrDefaultAsync(f => f.Id == functionId, ct);
+        if (function is not null && function.Code == "identity.role.manage")
+        {
+            var anotherHolderRemains = await _db.RoleFunctions
+                .Where(rf => rf.FunctionId == functionId && rf.RoleId != id)
+                .Join(_db.UserCompanyRoles, rf => rf.RoleId, ucr => ucr.RoleId, (rf, ucr) => ucr.UserId)
+                .Join(_db.Users, userId => userId, u => u.Id, (userId, u) => u.Status)
+                .AnyAsync(status => status != UserStatus.Deactivated, ct);
+
+            if (!anotherHolderRemains)
+                return Conflict("Revoking this would leave no active user in the tenant able to manage roles — grant identity.role.manage to another role first.");
+        }
+
         _db.RoleFunctions.Remove(grant);
         await _db.SaveChangesAsync(ct);
         return NoContent();

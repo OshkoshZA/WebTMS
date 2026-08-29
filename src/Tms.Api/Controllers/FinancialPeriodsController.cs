@@ -27,11 +27,13 @@ public class FinancialPeriodsController : ControllerBase
 {
     private readonly TmsDbContext _db;
     private readonly ICurrentUserAccessor _currentUser;
+    private readonly ITenantContext _tenantContext;
 
-    public FinancialPeriodsController(TmsDbContext db, ICurrentUserAccessor currentUser)
+    public FinancialPeriodsController(TmsDbContext db, ICurrentUserAccessor currentUser, ITenantContext tenantContext)
     {
         _db = db;
         _currentUser = currentUser;
+        _tenantContext = tenantContext;
     }
 
     [HttpGet]
@@ -63,6 +65,14 @@ public class FinancialPeriodsController : ControllerBase
     [Authorize(Policy = "finance.period.close")]
     public async Task<IActionResult> Close(Guid id, CancellationToken ct)
     {
+        // Unlike every other mutating action in this codebase, this controller never
+        // checked Tenant/Company were actually resolved before touching data — the
+        // global query filter degrades to tenant-only scoping when CompanyId is null
+        // (§4.1), which would let Close act on a different company's period in the
+        // same tenant. Matches the guard every sibling controller already has.
+        if (_tenantContext.TenantId is null || _tenantContext.CompanyId is null)
+            return Unauthorized("Request is missing a resolved Tenant/Company context.");
+
         var period = await _db.FinancialPeriods.FirstOrDefaultAsync(p => p.Id == id, ct);
         if (period is null) return NotFound();
         if (period.Status != FinancialPeriodStatus.Open)
@@ -93,7 +103,19 @@ public class FinancialPeriodsController : ControllerBase
 
         await WriteDebtorsAgingSnapshotsAsync(period, ct);
 
-        await _db.SaveChangesAsync(ct);
+        try
+        {
+            await _db.SaveChangesAsync(ct);
+        }
+        catch (DbUpdateException)
+        {
+            // FinancialPeriodOneOpenPerCompanyIndex catches a race between two
+            // concurrent Close (or Close/Create) calls that both read "no other Open
+            // period" before either committed — turns a real double-open into a clean
+            // 409 instead of a raw 500.
+            return Conflict("This period was already closed, or another period was already opened, by a concurrent request.");
+        }
+
         return NoContent();
     }
 

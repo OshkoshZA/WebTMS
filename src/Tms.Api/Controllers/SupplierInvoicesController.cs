@@ -159,18 +159,40 @@ public class SupplierInvoicesController : ControllerBase
         var totalEstimated = accruals.Sum(a => a.EstimatedAmount);
         var varianceAmount = invoice.Amount - totalEstimated;
 
-        var allocated = 0m;
+        // Largest-remainder apportionment, in whole cents: floor each accrual's raw
+        // share, then hand out the few cents left over to whichever lines had the
+        // largest fractional remainder. Always sums to exactly invoice.Amount and
+        // never produces a negative line — unlike the previous "last line absorbs the
+        // rounding" approach, which a large variance spread across many accruals
+        // could drive negative (each line's rounding can be off by up to half a cent;
+        // over enough lines that adds up to real money).
+        var totalCents = (long)Math.Round(invoice.Amount * 100m, 0, MidpointRounding.AwayFromZero);
+        var hasWeight = totalEstimated != 0m;
+        var centsShare = new long[accruals.Count];
+        var remainders = new decimal[accruals.Count];
+        var flooredSum = 0L;
+
+        for (var i = 0; i < accruals.Count; i++)
+        {
+            var weight = hasWeight ? accruals[i].EstimatedAmount / totalEstimated : 1m / accruals.Count;
+            var rawCents = totalCents * weight;
+            var flooredCents = (long)Math.Floor(rawCents);
+            centsShare[i] = flooredCents;
+            remainders[i] = rawCents - flooredCents;
+            flooredSum += flooredCents;
+        }
+
+        foreach (var index in Enumerable.Range(0, accruals.Count)
+            .OrderByDescending(i => remainders[i])
+            .Take((int)(totalCents - flooredSum)))
+        {
+            centsShare[index] += 1;
+        }
+
         for (var i = 0; i < accruals.Count; i++)
         {
             var accrual = accruals[i];
-
-            // Apportion the invoice's actual Amount by each accrual's share of the
-            // total estimate; the last line absorbs whatever's left so the expensed
-            // total always lands on invoice.Amount exactly, never a rounding-short cent.
-            var expenseAmount = i == accruals.Count - 1
-                ? invoice.Amount - allocated
-                : totalEstimated == 0m ? 0m : Math.Round(invoice.Amount * (accrual.EstimatedAmount / totalEstimated), 2);
-            allocated += expenseAmount;
+            var expenseAmount = centsShare[i] / 100m;
 
             accrual.Status = SubcontractorAccrualStatus.Netted;
 
@@ -197,7 +219,18 @@ public class SupplierInvoicesController : ControllerBase
 
         invoice.Status = SupplierInvoiceStatus.Matched;
 
-        await _db.SaveChangesAsync(ct);
+        try
+        {
+            await _db.SaveChangesAsync(ct);
+        }
+        catch (DbUpdateException)
+        {
+            // SubcontractorExpenseAccrualIndex catches a race between two concurrent
+            // Match calls that both read the same accrual as still Accrued before
+            // either committed — turns a real double-net into a clean 409 instead of
+            // a raw 500, same pattern as SupplierInvoiceNumberIndex above.
+            return Conflict("One or more of these accruals were already matched by a concurrent request.");
+        }
 
         // Reload so the response reflects the SubcontractorExpense rows just inserted —
         // invoice.Expenses (populated only by the collection-navigation Add we removed
@@ -212,6 +245,9 @@ public class SupplierInvoicesController : ControllerBase
     [Authorize(Policy = "finance.subcontractorinvoice.process")]
     public async Task<IActionResult> Dispute(Guid id, DisputeSupplierInvoiceRequest request, CancellationToken ct)
     {
+        if (_tenantContext.TenantId is null || _tenantContext.CompanyId is null)
+            return Unauthorized("Request is missing a resolved Tenant/Company context.");
+
         var invoice = await _db.SupplierInvoices.FirstOrDefaultAsync(si => si.Id == id, ct);
         if (invoice is null) return NotFound();
         if (invoice.Status != SupplierInvoiceStatus.Received)

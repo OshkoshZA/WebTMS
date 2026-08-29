@@ -65,8 +65,11 @@ public class AuthController : ControllerBase
             return Unauthorized("This account has been deactivated.");
 
         // A user's company assignments (§07) — which Company(ies) they hold a role in.
+        // Ordered by CompanyId so "no CompanyId given" resolves to the same assignment
+        // on every login rather than whatever order the database happens to return.
         var assignments = await _db.UserCompanyRoles
             .Where(ucr => ucr.UserId == user.Id)
+            .OrderBy(ucr => ucr.CompanyId)
             .ToListAsync(ct);
 
         if (assignments.Count == 0)
@@ -74,7 +77,7 @@ public class AuthController : ControllerBase
 
         var assignment = request.CompanyId is Guid requestedCompanyId
             ? assignments.FirstOrDefault(a => a.CompanyId == requestedCompanyId)
-            : assignments.First(); // no company specified — default to the first assignment
+            : assignments.First(); // no company specified — default to the (deterministic) first assignment
 
         if (assignment is null)
             return Forbid(); // authenticated, but not assigned to the requested Company
@@ -137,7 +140,23 @@ public class AuthController : ControllerBase
             return Unauthorized(new { error = "invalid_grant", detail = "This account has been deactivated." });
         }
 
-        existing.RevokedAt = DateTimeOffset.UtcNow; // this one is now spent — rotation, not reuse
+        // Atomically claims this token — only succeeds if it's still unrevoked at the
+        // instant of the UPDATE. The in-memory `existing.RevokedAt is not null` check
+        // above can only catch reuse from an *earlier*, already-committed rotation; it
+        // can't catch two concurrent Refresh calls for the same token both reading
+        // RevokedAt == null before either commits. ExecuteUpdateAsync issues a single
+        // atomic `UPDATE ... WHERE RevokedAt IS NULL`, so at most one of two racing
+        // requests can affect the row.
+        var claimed = await _db.Set<RefreshToken>().IgnoreQueryFilters()
+            .Where(t => t.Id == existing.Id && t.RevokedAt == null)
+            .ExecuteUpdateAsync(s => s.SetProperty(t => t.RevokedAt, DateTimeOffset.UtcNow), ct);
+
+        if (claimed == 0)
+        {
+            await _refreshTokens.RevokeFamilyAsync(existing.FamilyId, ct);
+            await _db.SaveChangesAsync(ct);
+            return Unauthorized(new { error = "invalid_grant", detail = "Refresh token reuse detected; session revoked." });
+        }
 
         var (roleNames, functionCodes) = await ResolveRolesAndFunctionsAsync(user.Id, existing.CompanyId, ct);
         var accessToken = _tokenService.IssueAccessToken(user, existing.CompanyId, roleNames, functionCodes);

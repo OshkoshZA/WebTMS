@@ -211,6 +211,31 @@ public class UsersController : ControllerBase
         var assignment = await _db.UserCompanyRoles.FirstOrDefaultAsync(ucr => ucr.Id == companyRoleId && ucr.UserId == id, ct);
         if (assignment is null) return NotFound();
 
+        // Removing an assignment that carries identity.user.manage needs a
+        // last-holder check, the same reasoning as Deactivate's self-guard above and
+        // RolesController.RevokeFunction's equivalent check on identity.role.manage:
+        // even if the role itself still grants the function, this specific user might
+        // be the only one actually holding a role that grants it here — losing it
+        // would strand the tenant with no one able to manage users at all, including
+        // reversing this very removal.
+        var roleGrantsUserManage = await _db.RoleFunctions
+            .Join(_db.Functions, rf => rf.FunctionId, f => f.Id, (rf, f) => new { rf.RoleId, f.Code })
+            .AnyAsync(x => x.RoleId == assignment.RoleId && x.Code == "identity.user.manage", ct);
+
+        if (roleGrantsUserManage)
+        {
+            var anotherHolderRemains = await _db.UserCompanyRoles
+                .Where(ucr => ucr.Id != companyRoleId)
+                .Join(_db.RoleFunctions, ucr => ucr.RoleId, rf => rf.RoleId, (ucr, rf) => new { ucr.UserId, rf.FunctionId })
+                .Join(_db.Functions, x => x.FunctionId, f => f.Id, (x, f) => new { x.UserId, f.Code })
+                .Where(x => x.Code == "identity.user.manage")
+                .Join(_db.Users, x => x.UserId, u => u.Id, (x, u) => u.Status)
+                .AnyAsync(status => status != UserStatus.Deactivated, ct);
+
+            if (!anotherHolderRemains)
+                return Conflict("Removing this would leave no active user in the tenant able to manage users — assign identity.user.manage to another user first.");
+        }
+
         _db.UserCompanyRoles.Remove(assignment);
         await _db.SaveChangesAsync(ct);
         return NoContent();

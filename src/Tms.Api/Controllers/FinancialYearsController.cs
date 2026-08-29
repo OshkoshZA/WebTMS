@@ -119,7 +119,19 @@ public class FinancialYearsController : ControllerBase
         }
 
         _db.FinancialYears.Add(year);
-        await _db.SaveChangesAsync(ct);
+
+        try
+        {
+            await _db.SaveChangesAsync(ct);
+        }
+        catch (DbUpdateException)
+        {
+            // FinancialPeriodOneOpenPerCompanyIndex catches a race between two
+            // concurrent Create calls that both read "no Open period yet" before
+            // either committed — turns a real double-open into a clean 409 instead of
+            // a raw 500.
+            return Conflict("Another financial year/period was already opened for this company by a concurrent request.");
+        }
 
         return CreatedAtAction(nameof(Get), new { id = year.Id }, ToResponse(year));
     }

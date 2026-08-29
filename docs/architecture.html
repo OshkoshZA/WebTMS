@@ -554,6 +554,7 @@ erDiagram
       </div>
 
       <h3><span class="secnum">5.1</span>Key entities</h3>
+      <div class="note" style="margin-bottom:12px;"><strong>Deactivation is enforced, not just labelled:</strong> a <span class="pill bad">Deactivated</span> Client can't have a new Load booked against it, and a <span class="pill bad">Deactivated</span> Subcontractor can't be allocated to a new leg — checked at exactly those two commitment points. Settling an already-existing relationship (invoicing a client's delivered loads, matching a subcontractor's supplier invoice against its accruals) is deliberately unaffected — deactivation stops new business, not the wind-down of what's already committed.</div>
       <div class="tablewrap">
         <table>
           <thead><tr><th>Entity</th><th>Purpose</th><th>Notable fields</th></tr></thead>
@@ -604,6 +605,7 @@ flowchart LR
 </pre>
         <div class="cap">Fig. 3 — Load status lifecycle. A subcontracted leg's accrual starts as soon as it's Allocated — well before POD — and is settled independently of the sell side; §10 details both tracks.</div>
       </div>
+      <div class="note"><strong>Allocation is race-safe:</strong> assigning a leg's resource holds an exclusive, transaction-scoped SQL Server application lock on that leg for the whole operation (the same <span class="mono">sp_getapplock</span> mechanism as the credit-limit lock, §5.4, just keyed on a leg instead of a client) — two concurrent Allocate calls for the same Planned leg can't both pass every check before either commits. Verified live: 10 concurrent Allocate calls against one leg produced exactly one success and nine clean rejections, with exactly one <span class="mono">LoadConfirmation</span> raised. A load that's <span class="pill bad">Cancelled</span> can no longer have legs added, allocated, started, or commodity-lined — closing a gap where only <span class="pill warn">On Hold</span> was checked before.</div>
       <div class="tablewrap" style="margin-top:14px;">
         <table>
           <thead><tr><th>Status</th><th>Meaning</th></tr></thead>
@@ -773,6 +775,7 @@ flowchart LR
             <li>Roles are company-scoped — the same person can be a Dispatcher in one country and view-only in another — but always within one Tenant; no role, including admin roles, is able to cross a tenant boundary (§4.1).</li>
             <li>A super-admin role manages roles/functions/company assignment itself, gated by its own function.</li>
             <li>Two further identity types — <span class="mono">ClientContact</span> and <span class="mono">SubcontractorContact</span> — reuse this same Role/Function model but are scoped to a single party rather than a Company; see §13.1.</li>
+            <li><strong>Last-holder guards:</strong> revoking <span class="mono">identity.role.manage</span> from a role, or removing a user's company/role assignment that carries <span class="mono">identity.user.manage</span>, is refused if no other active user in the tenant would still hold it afterward — unlike most functions, losing either of these has no recovery path through the API at all. Verified live: revoking from the only holder is rejected; granting the same function to a second role first, then assigning an active user to it, makes the original revoke succeed.</li>
           </ul>
         </div>
         <div class="card">
@@ -923,6 +926,7 @@ flowchart LR
         <li>A <strong>credit note</strong> adjusts an issued invoice — rate disputes, short-delivery, damage claims — always linked back to the invoice line(s) it corrects, in the same client currency. Raising one requires the <span class="mono">finance.creditnote.approve</span> function, since it reduces recognised revenue.</li>
         <li>A standalone credit note (not tied to a prior invoice) is supported for goodwill/ad-hoc adjustments, but still requires the same approval function.</li>
         <li>Issued invoices and credit notes are visible directly to the client through the Customer Portal (§13.2) — no separate export or emailing step required for the client to see their own statement.</li>
+        <li>A sell <span class="mono">RateLine</span> can be billed at most once — a unique database constraint, not just the application-layer check — so two concurrent Generate calls racing over the same client's unbilled lines can't both invoice the same line.</li>
       </ul>
       <div class="tablewrap">
         <table>
@@ -963,6 +967,7 @@ flowchart LR
         <li>Matching (an AP function, gated by <span class="mono">finance.subcontractorinvoice.process</span>) atomically nets off the accrual and finalizes the <span class="mono">SubcontractorExpense</span> at the actual invoiced amount. Only at that point does the expense become <span class="pill accent">Available to Export</span> — eligible for the AP/GL export run and a payment run.</li>
         <li>A variance between the accrual estimate and the actual invoice is flagged for review rather than silently absorbed, so it can't quietly distort margin reporting.</li>
         <li><strong>Implemented:</strong> a commodity line on a Subcontracted leg now carries a <span class="mono">BuyRatePerUnit</span> alongside its sell rate, raising a buy <span class="mono">RateLine</span> the same way §08 always described; <span class="mono">SubcontractorAccrual</span> is then raised automatically the moment that line's leg is both Subcontracted and Allocated — whichever order the two happen in. Debrief-approved extras (previous bullet) aren't wired in yet, since Debrief itself (§09) doesn't exist. Verified live: a two-line leg (R 1,000 + R 360 estimated) matched against a single R 1,400 supplier invoice apportioned the R 40 variance across both lines — R 1,029.41 and R 370.59 — landing on the invoiced total exactly, to the cent, with the variance itself returned on the match response rather than absorbed by either line.</li>
+        <li><strong>Apportionment never goes negative:</strong> matching splits the invoice's actual amount across accruals by a largest-remainder method (floor each share to whole cents, then hand the few leftover cents to whichever lines had the biggest fractional remainder) rather than dumping all rounding onto the last line — a large variance spread over many small accruals could previously drive that last line negative. Verified live: a R 1.00 invoice matched against seven R 1.00 accruals (a R 6.00 negative variance) split into five lines of R 0.14 and two of R 0.15, summing to exactly R 1.00 with nothing negative. A unique index on <span class="mono">SubcontractorExpense.AccrualId</span> also closes a race where two concurrent Match calls could otherwise both net the same accrual.</li>
       </ul>
       <div class="tablewrap">
         <table>
@@ -978,7 +983,7 @@ flowchart LR
       <h3><span class="secnum">10.3</span>Financial calendar &amp; debtors roll-over</h3>
       <p style="font-size:13.5px;max-width:70ch;">Every <span class="mono">Company</span> runs its own financial calendar — a <span class="mono">FinancialYear</span> divided into <span class="mono">FinancialPeriod</span>s, each with an explicit opening and closing date — because invoicing, credit notes, and subcontractor expenses all need to post against a period, not just a date, for period-end reporting and reconciliation to mean anything.</p>
       <ul style="font-size:13.5px;">
-        <li>A financial year need not follow the calendar year (a South African company's tax year, for instance, commonly runs March–February) and is divided into periods — typically 12, sometimes 13 with a stub/adjustment period. Exactly one period per Company is ever <span class="pill accent">Open</span> at a time; every Invoice, Credit Note, and Subcontractor Expense records the period it falls into automatically, resolved from its date rather than hand-picked.</li>
+        <li>A financial year need not follow the calendar year (a South African company's tax year, for instance, commonly runs March–February) and is divided into periods — typically 12, sometimes 13 with a stub/adjustment period. Exactly one period per Company is ever <span class="pill accent">Open</span> at a time — enforced by a filtered unique database constraint, not just an application-layer check, so two concurrent requests that both create/close a period can't both open one; every Invoice, Credit Note, and Subcontractor Expense records the period it falls into automatically, resolved from its date rather than hand-picked.</li>
         <li><strong>Period close</strong> is a function-gated action (<span class="mono">finance.period.close</span>) and, like every other approval boundary in this design (§09, §10.1, §10.2), is one-directional: once a period is <span class="pill warn">Closed</span>, nothing new can post into it — a correction afterwards is always a new document in the next open period, never a backdated edit.</li>
         <li>Closing a period and opening the next happen as one operation, so there is never a gap where no period is open and a new invoice would have nowhere to post.</li>
       </ul>
@@ -1036,6 +1041,7 @@ flowchart LR
         <li><strong>Interactive users</strong> — JWT bearer tokens issued after ASP.NET Core Identity login, short-lived with refresh tokens. This covers internal staff, and — with a fixed <span class="mono">ClientId</span> or <span class="mono">SubcontractorId</span> claim baked into the token — the Customer and Supplier Portals (§13.1) too.</li>
         <li><strong>System-to-system</strong> — OAuth2 client-credentials grant per integration partner, scoped to specific functions via the same role/function model (§07), to a single Tenant, and with per-client rate limits.</li>
         <li>All API access is logged with client id, function invoked, and payload hash for audit.</li>
+        <li><strong>Refresh rotation is race-safe:</strong> exchanging a refresh token atomically claims it (an <span class="mono">UPDATE ... WHERE RevokedAt IS NULL</span>, not a read-then-write) before issuing the next one in the family, so two concurrent refresh calls presenting the same still-valid token can't both succeed — the loser is treated the same as genuine reuse and the whole family is revoked. Verified live: 8 concurrent refresh calls against one token produced exactly one success and seven reuse-detected rejections.</li>
       </ul>
       <h3><span class="secnum">11.2</span>Representative endpoints</h3>
       <div class="tablewrap">

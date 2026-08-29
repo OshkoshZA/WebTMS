@@ -174,6 +174,18 @@ public class TmsDbContext : IdentityDbContext<ApplicationUser, ApplicationRole, 
             .WithOne()
             .HasForeignKey(p => p.FinancialYearId);
 
+        // Exactly one Open period per company (§10.3) is enforced here, not just by
+        // FinancialYearsController.Create/FinancialPeriodsController.Close's own
+        // read-then-write checks — two concurrent calls could otherwise both read "no
+        // Open period yet" before either committed, opening two at once. A filtered
+        // unique index only constrains rows where Status = Open (1), so as many
+        // Future/Closed periods as needed can still share a CompanyId freely.
+        modelBuilder.Entity<FinancialPeriod>()
+            .HasIndex(p => p.CompanyId)
+            .IsUnique()
+            .HasFilter("[Status] = 1")
+            .HasDatabaseName("FinancialPeriodOneOpenPerCompanyIndex");
+
         modelBuilder.Entity<DebtorsAgingSnapshot>().Property(s => s.CurrentAmount).HasPrecision(18, 2);
         modelBuilder.Entity<DebtorsAgingSnapshot>().Property(s => s.Days30).HasPrecision(18, 2);
         modelBuilder.Entity<DebtorsAgingSnapshot>().Property(s => s.Days60).HasPrecision(18, 2);
@@ -193,6 +205,14 @@ public class TmsDbContext : IdentityDbContext<ApplicationUser, ApplicationRole, 
         modelBuilder.Entity<InvoiceLine>().Property(l => l.Rate).HasPrecision(18, 4);
         modelBuilder.Entity<InvoiceLine>().Property(l => l.Amount).HasPrecision(18, 2);
 
+        // A sell RateLine can be billed at most once — protects against two
+        // concurrent InvoicesController.Generate calls both reading the same line as
+        // unbilled before either committed.
+        modelBuilder.Entity<InvoiceLine>()
+            .HasIndex(l => l.RateLineSellId)
+            .IsUnique()
+            .HasDatabaseName("InvoiceLineRateLineSellIndex");
+
         modelBuilder.Entity<SupplierInvoice>()
             .HasMany(si => si.Expenses)
             .WithOne()
@@ -211,6 +231,27 @@ public class TmsDbContext : IdentityDbContext<ApplicationUser, ApplicationRole, 
         modelBuilder.Entity<SubcontractorAccrual>().Property(a => a.EstimatedAmount).HasPrecision(18, 2);
         modelBuilder.Entity<SupplierInvoice>().Property(si => si.Amount).HasPrecision(18, 2);
         modelBuilder.Entity<SubcontractorExpense>().Property(e => e.Amount).HasPrecision(18, 2);
+
+        // An accrual can be netted at most once — protects against two concurrent
+        // SupplierInvoicesController.Match calls both reading the same accrual as
+        // still Accrued before either committed.
+        modelBuilder.Entity<SubcontractorExpense>()
+            .HasIndex(e => e.AccrualId)
+            .IsUnique()
+            .HasDatabaseName("SubcontractorExpenseAccrualIndex");
+
+        // Defense in depth alongside LoadsController's per-leg SQL application lock
+        // (§5.2, §8.2, §10.2): a leg gets at most one LoadConfirmation and each buy
+        // RateLine at most one SubcontractorAccrual, even if some future code path
+        // ever raised either of these without holding that lock.
+        modelBuilder.Entity<LoadConfirmation>()
+            .HasIndex(lc => lc.LoadLegId)
+            .IsUnique()
+            .HasDatabaseName("LoadConfirmationLegIndex");
+        modelBuilder.Entity<SubcontractorAccrual>()
+            .HasIndex(a => a.RateLineBuyId)
+            .IsUnique()
+            .HasDatabaseName("SubcontractorAccrualRateLineIndex");
 
         ApplyTenancyScopeFilters(modelBuilder);
 

@@ -132,7 +132,19 @@ public class InvoicesController : ControllerBase
         invoice.TotalIncVat = invoice.TotalExVat + invoice.VatAmount;
 
         _db.Invoices.Add(invoice);
-        await _db.SaveChangesAsync(ct);
+
+        try
+        {
+            await _db.SaveChangesAsync(ct);
+        }
+        catch (DbUpdateException)
+        {
+            // InvoiceLineRateLineSellIndex catches a race between two concurrent
+            // Generate calls that both read the same sell RateLine as unbilled before
+            // either committed — turns a real double-bill into a clean 409 instead of
+            // a raw 500, same pattern as the composite name/number indexes elsewhere.
+            return Conflict("One or more of these sell lines were already invoiced by a concurrent request.");
+        }
 
         return CreatedAtAction(nameof(Get), new { id = invoice.Id }, ToResponse(invoice));
     }
@@ -142,6 +154,9 @@ public class InvoicesController : ControllerBase
     [Authorize(Policy = "finance.invoice.manage")]
     public async Task<IActionResult> Issue(Guid id, IssueInvoiceRequest request, CancellationToken ct)
     {
+        if (_tenantContext.TenantId is null || _tenantContext.CompanyId is null)
+            return Unauthorized("Request is missing a resolved Tenant/Company context.");
+
         var invoice = await _db.Invoices.FirstOrDefaultAsync(i => i.Id == id, ct);
         if (invoice is null) return NotFound();
         if (invoice.Status != InvoiceStatus.Draft)
@@ -161,6 +176,9 @@ public class InvoicesController : ControllerBase
     [Authorize(Policy = "finance.invoice.manage")]
     public async Task<IActionResult> Void(Guid id, CancellationToken ct)
     {
+        if (_tenantContext.TenantId is null || _tenantContext.CompanyId is null)
+            return Unauthorized("Request is missing a resolved Tenant/Company context.");
+
         var invoice = await _db.Invoices.FirstOrDefaultAsync(i => i.Id == id, ct);
         if (invoice is null) return NotFound();
         if (invoice.Status != InvoiceStatus.Draft)
