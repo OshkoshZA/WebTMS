@@ -10,13 +10,13 @@ using Tms.Shared;
 
 namespace Tms.Api.Controllers;
 
-public record GenerateInvoiceRequest(Guid ClientId, DateOnly? IssueDate = null);
+public record GenerateInvoiceRequest(Guid ClientId, Guid? CurrencyId = null, DateOnly? IssueDate = null);
 public record IssueInvoiceRequest(DateOnly? IssueDate = null);
 
 public record InvoiceLineResponse(Guid Id, Guid RateLineSellId, string Description, decimal Quantity, Guid UnitOfMeasureId, decimal Rate, decimal Amount);
 
 public record InvoiceResponse(
-    Guid Id, string InvoiceNumber, Guid ClientId, Guid FinancialPeriodId, DateOnly IssueDate, DateOnly DueDate,
+    Guid Id, string InvoiceNumber, Guid ClientId, Guid CurrencyId, Guid FinancialPeriodId, DateOnly IssueDate, DateOnly DueDate,
     InvoiceStatus Status, decimal TotalExVat, decimal VatAmount, decimal TotalIncVat, bool IsOverdue,
     IReadOnlyList<InvoiceLineResponse> Lines);
 
@@ -68,6 +68,12 @@ public class InvoicesController : ControllerBase
         var client = await _db.Clients.FirstOrDefaultAsync(c => c.Id == request.ClientId, ct);
         if (client is null) return NotFound($"Client {request.ClientId} was not found.");
 
+        // A client permitted to transact in more than one currency (§4.3) can have
+        // unbilled sell lines in each at once — never blended onto one invoice, since
+        // a single document can't carry two currencies. CurrencyId picks which one
+        // this call generates; omitted, it defaults to the client's primary.
+        var currencyId = request.CurrencyId ?? client.CurrencyId;
+
         var openPeriod = await _db.FinancialPeriods.FirstOrDefaultAsync(
             p => p.CompanyId == _tenantContext.CompanyId && p.Status == FinancialPeriodStatus.Open, ct);
         if (openPeriod is null)
@@ -76,7 +82,7 @@ public class InvoicesController : ControllerBase
         var alreadyInvoicedRateLineIds = _db.InvoiceLines.Select(l => l.RateLineSellId);
 
         var candidates = await _db.Set<RateLine>()
-            .Where(r => r.Direction == RateLineDirection.Sell && r.SourceType == RateLineSourceType.CommodityLine)
+            .Where(r => r.Direction == RateLineDirection.Sell && r.SourceType == RateLineSourceType.CommodityLine && r.CurrencyId == currencyId)
             .Where(r => !alreadyInvoicedRateLineIds.Contains(r.Id))
             .Join(_db.Set<CommodityLine>(), r => r.SourceId, cl => cl.Id, (r, cl) => new { r, cl })
             .Join(_db.Set<LoadLeg>(), x => x.cl.LoadLegId, leg => leg.Id, (x, leg) => new { x.r, x.cl, leg })
@@ -86,7 +92,7 @@ public class InvoicesController : ControllerBase
             .ToListAsync(ct);
 
         if (candidates.Count == 0)
-            return Conflict("No unbilled, Delivered sell lines found for this client.");
+            return Conflict("No unbilled, Delivered sell lines found for this client in that currency.");
 
         var commodityIds = candidates.Select(x => x.cl.CommodityId).Distinct().ToList();
         var commodityNames = await _db.Commodities
@@ -100,6 +106,7 @@ public class InvoicesController : ControllerBase
             CompanyId = _tenantContext.CompanyId.Value,
             InvoiceNumber = await NextInvoiceNumberAsync(_tenantContext.CompanyId.Value, ct),
             ClientId = client.Id,
+            CurrencyId = currencyId,
             FinancialPeriodId = openPeriod.Id,
             IssueDate = issueDate,
             DueDate = issueDate.AddDays(client.PaymentTermsDays)
@@ -173,7 +180,7 @@ public class InvoicesController : ControllerBase
     }
 
     internal static InvoiceResponse ToResponse(Invoice invoice) => new(
-        invoice.Id, invoice.InvoiceNumber, invoice.ClientId, invoice.FinancialPeriodId, invoice.IssueDate, invoice.DueDate,
+        invoice.Id, invoice.InvoiceNumber, invoice.ClientId, invoice.CurrencyId, invoice.FinancialPeriodId, invoice.IssueDate, invoice.DueDate,
         invoice.Status, invoice.TotalExVat, invoice.VatAmount, invoice.TotalIncVat,
         IsOverdue: invoice.Status is InvoiceStatus.Issued or InvoiceStatus.PartPaid && invoice.DueDate < DateOnly.FromDateTime(DateTime.UtcNow),
         invoice.Lines.Select(l => new InvoiceLineResponse(l.Id, l.RateLineSellId, l.Description, l.Quantity, l.UnitOfMeasureId, l.Rate, l.Amount)).ToList());

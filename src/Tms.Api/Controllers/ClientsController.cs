@@ -12,6 +12,8 @@ namespace Tms.Api.Controllers;
 
 public record CreateClientRequest(string Name, string RegistrationNo, Guid CurrencyId, decimal CreditLimit, int PaymentTermsDays);
 public record UpdateClientRequest(string Name, string RegistrationNo, decimal CreditLimit, int PaymentTermsDays);
+public record AddClientCurrencyRequest(Guid CurrencyId, decimal CreditLimit);
+public record UpdateClientCurrencyRequest(decimal CreditLimit);
 
 /// <summary>
 /// Client master data (docs/architecture.html §5.1). Follows the standard
@@ -93,14 +95,73 @@ public class ClientsController : ControllerBase
         return NoContent();
     }
 
-    /// <summary>Available credit, WIP, and AR outstanding for a client (docs/architecture.html §5.4, §11.2).</summary>
+    /// <summary>Available credit, WIP, and AR outstanding for a client, in one currency (docs/architecture.html §4.3, §5.4, §11.2) — defaults to the client's primary currency; pass currencyId for one of its additional allowed currencies instead.</summary>
     [HttpGet("{id:guid}/credit-status")]
-    public async Task<ActionResult<CreditStatus>> CreditStatus(Guid id, CancellationToken ct)
+    public async Task<ActionResult<CreditStatus>> CreditStatus(Guid id, Guid? currencyId, CancellationToken ct)
     {
         var client = await _db.Clients.FirstOrDefaultAsync(c => c.Id == id, ct);
         if (client is null) return NotFound();
 
-        return Ok(await _creditExposure.GetStatusAsync(client, ct));
+        var resolvedCurrencyId = currencyId ?? client.CurrencyId;
+        if (await _creditExposure.ResolveCreditLimitAsync(client, resolvedCurrencyId, ct) is null)
+            return BadRequest($"Client is not permitted to transact in currency {resolvedCurrencyId}.");
+
+        return Ok(await _creditExposure.GetStatusAsync(client, resolvedCurrencyId, ct));
+    }
+
+    /// <summary>Currencies this client is permitted to transact in, beyond its primary — its own CurrencyId is always implicitly allowed and isn't listed here (docs/architecture.html §4.3).</summary>
+    [HttpGet("{id:guid}/currencies")]
+    public async Task<ActionResult<IEnumerable<ClientCurrency>>> Currencies(Guid id, CancellationToken ct)
+    {
+        if (!await _db.Clients.AnyAsync(c => c.Id == id, ct)) return NotFound();
+
+        return Ok(await _db.Set<ClientCurrency>().Where(cc => cc.ClientId == id).ToListAsync(ct));
+    }
+
+    /// <summary>Grants this client an additional currency to transact in, with its own CreditLimit (§4.3) — the primary CurrencyId set at Create is always allowed and never needs a row here.</summary>
+    [HttpPost("{id:guid}/currencies")]
+    [Authorize(Policy = "client.currency.change")]
+    public async Task<ActionResult<ClientCurrency>> AddCurrency(Guid id, AddClientCurrencyRequest request, CancellationToken ct)
+    {
+        if (_tenantContext.TenantId is null || _tenantContext.CompanyId is null)
+            return Unauthorized("Request is missing a resolved Tenant/Company context.");
+
+        var client = await _db.Clients.FirstOrDefaultAsync(c => c.Id == id, ct);
+        if (client is null) return NotFound();
+
+        if (!await _db.Currencies.AnyAsync(c => c.Id == request.CurrencyId, ct))
+            return NotFound($"Currency {request.CurrencyId} was not found.");
+
+        if (request.CurrencyId == client.CurrencyId)
+            return Conflict("That is already this client's primary currency.");
+        if (await _db.Set<ClientCurrency>().AnyAsync(cc => cc.ClientId == id && cc.CurrencyId == request.CurrencyId, ct))
+            return Conflict("This client is already permitted to transact in that currency.");
+
+        var clientCurrency = new ClientCurrency
+        {
+            TenantId = _tenantContext.TenantId.Value,
+            CompanyId = _tenantContext.CompanyId.Value,
+            ClientId = id,
+            CurrencyId = request.CurrencyId,
+            CreditLimit = request.CreditLimit
+        };
+        _db.Set<ClientCurrency>().Add(clientCurrency);
+        await _db.SaveChangesAsync(ct);
+
+        return CreatedAtAction(nameof(Currencies), new { id }, clientCurrency);
+    }
+
+    /// <summary>Updates the CreditLimit for one of this client's additional currencies — the primary currency's limit is still edited through the plain Update action instead.</summary>
+    [HttpPut("{id:guid}/currencies/{currencyId:guid}")]
+    [Authorize(Policy = "client.currency.change")]
+    public async Task<IActionResult> UpdateCurrency(Guid id, Guid currencyId, UpdateClientCurrencyRequest request, CancellationToken ct)
+    {
+        var clientCurrency = await _db.Set<ClientCurrency>().FirstOrDefaultAsync(cc => cc.ClientId == id && cc.CurrencyId == currencyId, ct);
+        if (clientCurrency is null) return NotFound();
+
+        clientCurrency.CreditLimit = request.CreditLimit;
+        await _db.SaveChangesAsync(ct);
+        return NoContent();
     }
 
     [HttpPost("{id:guid}/deactivate")]

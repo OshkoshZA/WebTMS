@@ -161,6 +161,8 @@ public static class DevelopmentSeeder
              "Push a load or commodity line through over a client's credit limit, with a logged reason (§5.4)."),
             ("client.master.manage",
              "Create, update, and deactivate Client master data, including its credit limit and payment terms (§11.2)."),
+            ("client.currency.change",
+             "Grant a Client an additional allowed currency (with its own credit limit) or update that limit (§4.3) — separate from client.master.manage since it changes what a client can even be billed in, not just its master-data fields."),
             ("integration.apiclient.manage",
              "Create, rotate secrets for, and revoke system-to-system API clients (§11.1)."),
             ("identity.user.manage",

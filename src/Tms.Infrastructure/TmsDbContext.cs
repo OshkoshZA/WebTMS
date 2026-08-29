@@ -60,7 +60,9 @@ public class TmsDbContext : IdentityDbContext<ApplicationUser, ApplicationRole, 
 
     // Loads (§5.1, §5.2, §5.5)
     public DbSet<Client> Clients => Set<Client>();
+    public DbSet<ClientCurrency> ClientCurrencies => Set<ClientCurrency>();
     public DbSet<Subcontractor> Subcontractors => Set<Subcontractor>();
+    public DbSet<SubcontractorCurrency> SubcontractorCurrencies => Set<SubcontractorCurrency>();
     public DbSet<CostCentre> CostCentres => Set<CostCentre>();
     public DbSet<Commodity> Commodities => Set<Commodity>();
     public DbSet<Load> Loads => Set<Load>();
@@ -100,6 +102,19 @@ public class TmsDbContext : IdentityDbContext<ApplicationUser, ApplicationRole, 
         modelBuilder.Entity<RateLine>().Property(r => r.Amount).HasPrecision(18, 2);
         modelBuilder.Entity<RateLine>().Property(r => r.Quantity).HasPrecision(18, 3);
         modelBuilder.Entity<RateLine>().Property(r => r.RatePerUnit).HasPrecision(18, 4);
+
+        // A client/subcontractor's currency allow-list (§4.3) — each row a currency
+        // beyond the party's own primary CurrencyId, which is always implicitly
+        // allowed and so never needs a row here.
+        modelBuilder.Entity<ClientCurrency>().Property(cc => cc.CreditLimit).HasPrecision(18, 2);
+        modelBuilder.Entity<ClientCurrency>()
+            .HasIndex(cc => new { cc.ClientId, cc.CurrencyId })
+            .IsUnique()
+            .HasDatabaseName("ClientCurrencyIndex");
+        modelBuilder.Entity<SubcontractorCurrency>()
+            .HasIndex(sc => new { sc.SubcontractorId, sc.CurrencyId })
+            .IsUnique()
+            .HasDatabaseName("SubcontractorCurrencyIndex");
 
         modelBuilder.Entity<Load>()
             .HasMany(l => l.Legs)

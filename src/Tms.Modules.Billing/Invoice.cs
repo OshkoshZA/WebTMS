@@ -12,9 +12,11 @@ public enum InvoiceStatus
 }
 
 /// <summary>
-/// A sell-side invoice raised per Client, in that client's fixed currency (§10.1) —
-/// aggregating one line per approved commodity line, either scheduled or on demand.
-/// Lifecycle: Draft -> Issued -> PartPaid/Paid; Void/cancel only while still Draft.
+/// A sell-side invoice raised per Client, in one of that client's allowed currencies
+/// (§4.3, §10.1) — never blended, so a client transacting in two currencies gets one
+/// Draft invoice per currency, not one mixed document — aggregating one line per
+/// approved commodity line, either scheduled or on demand. Lifecycle: Draft -> Issued
+/// -> PartPaid/Paid; Void/cancel only while still Draft.
 /// "Overdue" isn't a stored state — it's derived from DueDate (see InvoiceResponse).
 ///
 /// Debrief approval (§09) doesn't exist yet (a later phase), so InvoicesController
@@ -28,6 +30,7 @@ public class Invoice : CompanyScopedEntity
 {
     public string InvoiceNumber { get; set; } = string.Empty;
     public Guid ClientId { get; set; }
+    public Guid CurrencyId { get; set; }
     public Guid FinancialPeriodId { get; set; }
     public DateOnly IssueDate { get; set; }
     public DateOnly DueDate { get; set; }

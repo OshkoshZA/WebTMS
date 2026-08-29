@@ -14,6 +14,8 @@ public record CreateSubcontractorRequest(
 public record UpdateSubcontractorRequest(
     string Name, string RegistrationNo, DateOnly? InsuranceExpiry, string? BankingDetails, int PaymentTermsDays);
 
+public record AddSubcontractorCurrencyRequest(Guid CurrencyId);
+
 /// <summary>
 /// Subcontractor (third-party carrier) master data (docs/architecture.html §5.1, §10.2).
 /// Follows the standard master-data CRUD convention (§11.5): list / get / create /
@@ -103,5 +105,46 @@ public class SubcontractorsController : ControllerBase
         subcontractor.Status = SubcontractorStatus.Deactivated; // never a hard delete — §11.5
         await _db.SaveChangesAsync(ct);
         return NoContent();
+    }
+
+    /// <summary>Currencies this subcontractor is permitted to be paid in, beyond its primary — its own CurrencyId is always implicitly allowed and isn't listed here (docs/architecture.html §4.3).</summary>
+    [HttpGet("{id:guid}/currencies")]
+    public async Task<ActionResult<IEnumerable<SubcontractorCurrency>>> Currencies(Guid id, CancellationToken ct)
+    {
+        if (!await _db.Subcontractors.AnyAsync(s => s.Id == id, ct)) return NotFound();
+
+        return Ok(await _db.Set<SubcontractorCurrency>().Where(sc => sc.SubcontractorId == id).ToListAsync(ct));
+    }
+
+    /// <summary>Grants this subcontractor an additional currency to be paid in (§4.3) — the primary CurrencyId set at Create is always allowed and never needs a row here. No credit limit involved, unlike ClientsController's equivalent — we owe the subcontractor, not the reverse.</summary>
+    [HttpPost("{id:guid}/currencies")]
+    [Authorize(Policy = "subcontractor.master.manage")]
+    public async Task<ActionResult<SubcontractorCurrency>> AddCurrency(Guid id, AddSubcontractorCurrencyRequest request, CancellationToken ct)
+    {
+        if (_tenantContext.TenantId is null || _tenantContext.CompanyId is null)
+            return Unauthorized("Request is missing a resolved Tenant/Company context.");
+
+        var subcontractor = await _db.Subcontractors.FirstOrDefaultAsync(s => s.Id == id, ct);
+        if (subcontractor is null) return NotFound();
+
+        if (!await _db.Currencies.AnyAsync(c => c.Id == request.CurrencyId, ct))
+            return NotFound($"Currency {request.CurrencyId} was not found.");
+
+        if (request.CurrencyId == subcontractor.CurrencyId)
+            return Conflict("That is already this subcontractor's primary currency.");
+        if (await _db.Set<SubcontractorCurrency>().AnyAsync(sc => sc.SubcontractorId == id && sc.CurrencyId == request.CurrencyId, ct))
+            return Conflict("This subcontractor is already permitted to be paid in that currency.");
+
+        var subcontractorCurrency = new SubcontractorCurrency
+        {
+            TenantId = _tenantContext.TenantId.Value,
+            CompanyId = _tenantContext.CompanyId.Value,
+            SubcontractorId = id,
+            CurrencyId = request.CurrencyId
+        };
+        _db.Set<SubcontractorCurrency>().Add(subcontractorCurrency);
+        await _db.SaveChangesAsync(ct);
+
+        return CreatedAtAction(nameof(Currencies), new { id }, subcontractorCurrency);
     }
 }

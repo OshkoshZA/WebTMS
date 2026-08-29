@@ -34,6 +34,7 @@ public class SubcontractorAccrual : CompanyScopedEntity
 {
     public Guid RateLineBuyId { get; set; }
     public Guid SubcontractorId { get; set; }
+    public Guid CurrencyId { get; set; }
     public DateOnly AccrualDate { get; set; }
     public decimal EstimatedAmount { get; set; }
     public SubcontractorAccrualStatus Status { get; set; } = SubcontractorAccrualStatus.Accrued;
@@ -49,6 +50,7 @@ public class SubcontractorAccrual : CompanyScopedEntity
 public class SupplierInvoice : CompanyScopedEntity
 {
     public Guid SubcontractorId { get; set; }
+    public Guid CurrencyId { get; set; }
     public string SupplierInvoiceNumber { get; set; } = string.Empty;
     public DateOnly InvoiceDate { get; set; }
     public DateOnly ReceivedDate { get; set; }
@@ -73,6 +75,7 @@ public class SupplierInvoice : CompanyScopedEntity
 public class SubcontractorExpense : CompanyScopedEntity
 {
     public Guid SubcontractorId { get; set; }
+    public Guid CurrencyId { get; set; }
     public Guid RateLineBuyId { get; set; }
     public Guid AccrualId { get; set; }
     public Guid SupplierInvoiceId { get; set; }

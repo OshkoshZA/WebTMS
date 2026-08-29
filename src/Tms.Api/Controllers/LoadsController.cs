@@ -32,6 +32,8 @@ public record AddCommodityLineRequest(
     Guid UnitOfMeasureId,
     decimal SellRatePerUnit,
     decimal? BuyRatePerUnit = null,
+    Guid? SellCurrencyId = null,
+    Guid? BuyCurrencyId = null,
     string? CreditOverrideReason = null);
 
 public record HoldLoadRequest(string Reason);
@@ -99,8 +101,12 @@ public class LoadsController : ControllerBase
 
         // A brand-new load carries no sell value yet, so the only thing worth
         // checking here is whether the client is *already* over limit from prior
-        // loads — in which case starting another one is refused outright too.
-        var creditCheck = await CheckCreditAsync(client, additionalAmount: 0m, request.CreditOverrideReason, ct);
+        // loads — in which case starting another one is refused outright too. This
+        // preliminary check always looks at the client's primary currency (§4.3):
+        // which currency a load will actually use isn't known until its first
+        // commodity line is added (AddCommodityLine), where the real, currency-scoped
+        // check happens.
+        var creditCheck = await CheckCreditAsync(client, additionalAmount: 0m, request.CreditOverrideReason, client.CurrencyId, ct);
         if (creditCheck is not null) return creditCheck; // creditLock disposed uncommitted -> rolled back
 
         var load = new Load
@@ -226,8 +232,28 @@ public class LoadsController : ControllerBase
         {
             if (request.SubcontractorId is null || request.VehicleId is not null || request.DriverId is not null)
                 return BadRequest("A Subcontracted leg is allocated with SubcontractorId only.");
-            if (!await _db.Subcontractors.AnyAsync(s => s.Id == request.SubcontractorId, ct))
-                return NotFound($"Subcontractor {request.SubcontractorId} was not found.");
+
+            var subcontractor = await _db.Subcontractors.FirstOrDefaultAsync(s => s.Id == request.SubcontractorId, ct);
+            if (subcontractor is null) return NotFound($"Subcontractor {request.SubcontractorId} was not found.");
+
+            // A commodity line's buy rate can be added before this leg has a
+            // subcontractor assigned (no allow-list to check against yet — see
+            // AddCommodityLine), so any currency it landed on was only provisional.
+            // Now that the actual subcontractor is known, make sure it really is
+            // permitted to be paid in every currency already sitting on this leg.
+            var existingBuyCurrencyIds = await _db.Set<RateLine>()
+                .Where(r => r.Direction == RateLineDirection.Buy && r.SourceType == RateLineSourceType.CommodityLine)
+                .Join(_db.Set<CommodityLine>(), r => r.SourceId, cl => cl.Id, (r, cl) => new { r, cl })
+                .Where(x => x.cl.LoadLegId == leg.Id)
+                .Select(x => x.r.CurrencyId)
+                .Distinct()
+                .ToListAsync(ct);
+
+            foreach (var currencyId in existingBuyCurrencyIds)
+            {
+                if (!await IsSubcontractorCurrencyAllowedAsync(subcontractor, currencyId, ct))
+                    return Conflict($"Subcontractor is not permitted to transact in currency {currencyId}, but a buy rate already on this leg uses it.");
+            }
 
             leg.SubcontractorId = request.SubcontractorId;
         }
@@ -378,13 +404,43 @@ public class LoadsController : ControllerBase
         var client = await _db.Clients.FirstOrDefaultAsync(c => c.Id == load.ClientId, ct);
         if (client is null) return NotFound($"Client {load.ClientId} was not found.");
 
+        var sellCurrencyId = request.SellCurrencyId ?? client.CurrencyId;
+        var sellCreditLimit = await _creditExposure.ResolveCreditLimitAsync(client, sellCurrencyId, ct);
+        if (sellCreditLimit is null)
+            return BadRequest($"Client is not permitted to transact in currency {sellCurrencyId} — add it via POST /clients/{{id}}/currencies first.");
+
+        // A buy rate's currency can only be validated against the leg's actual
+        // subcontractor once one is assigned (leg.SubcontractorId is set exactly when
+        // the leg is Allocated — see AddLeg/AllocateLeg). Before that, there's no
+        // allow-list to check against yet, so BuyCurrencyId must be given explicitly;
+        // AllocateLeg re-validates it once the subcontractor becomes known.
+        Guid? buyCurrencyId = null;
+        if (request.BuyRatePerUnit is not null)
+        {
+            if (leg.SubcontractorId is Guid legSubcontractorId)
+            {
+                var subcontractor = await _db.Subcontractors.FirstAsync(s => s.Id == legSubcontractorId, ct);
+                buyCurrencyId = request.BuyCurrencyId ?? subcontractor.CurrencyId;
+                if (!await IsSubcontractorCurrencyAllowedAsync(subcontractor, buyCurrencyId.Value, ct))
+                    return BadRequest($"Subcontractor is not permitted to transact in currency {buyCurrencyId} — add it via POST /subcontractors/{{id}}/currencies first.");
+            }
+            else if (request.BuyCurrencyId is Guid explicitBuyCurrencyId)
+            {
+                buyCurrencyId = explicitBuyCurrencyId;
+            }
+            else
+            {
+                return BadRequest("BuyCurrencyId is required when adding a buy rate to a leg that isn't allocated to a subcontractor yet.");
+            }
+        }
+
         var sellAmount = request.Quantity * request.SellRatePerUnit;
 
         // See Create's identical use of this lock (§5.4) — same per-client resource,
         // so the two endpoints serialize against each other too, not just themselves.
         await using var creditLock = await _creditExposure.BeginCreditLockAsync(_tenantContext.TenantId.Value, client.Id, ct);
 
-        var creditCheck = await CheckCreditAsync(client, sellAmount, request.CreditOverrideReason, ct);
+        var creditCheck = await CheckCreditAsync(client, sellAmount, request.CreditOverrideReason, sellCurrencyId, ct);
         if (creditCheck is not null) return creditCheck; // creditLock disposed uncommitted -> rolled back
 
         var commodityLine = new CommodityLine
@@ -405,6 +461,7 @@ public class LoadsController : ControllerBase
             SourceType = RateLineSourceType.CommodityLine,
             SourceId = commodityLine.Id,
             Direction = RateLineDirection.Sell,
+            CurrencyId = sellCurrencyId,
             RatePerUnit = request.SellRatePerUnit,
             UnitOfMeasureId = request.UnitOfMeasureId,
             Quantity = request.Quantity,
@@ -420,6 +477,7 @@ public class LoadsController : ControllerBase
                 SourceType = RateLineSourceType.CommodityLine,
                 SourceId = commodityLine.Id,
                 Direction = RateLineDirection.Buy,
+                CurrencyId = buyCurrencyId!.Value,
                 RatePerUnit = buyRatePerUnit,
                 UnitOfMeasureId = request.UnitOfMeasureId,
                 Quantity = request.Quantity,
@@ -504,10 +562,16 @@ public class LoadsController : ControllerBase
             CompanyId = leg.CompanyId,
             RateLineBuyId = buyRateLine.Id,
             SubcontractorId = leg.SubcontractorId.Value,
+            CurrencyId = buyRateLine.CurrencyId,
             AccrualDate = DateOnly.FromDateTime(DateTime.UtcNow),
             EstimatedAmount = buyRateLine.Amount
         });
     }
+
+    /// <summary>Whether a Subcontractor is permitted to transact in a given currency (§4.3) — its own primary CurrencyId, or an explicit SubcontractorCurrency allow-list row.</summary>
+    private async Task<bool> IsSubcontractorCurrencyAllowedAsync(Tms.Modules.Loads.Subcontractor subcontractor, Guid currencyId, CancellationToken ct) =>
+        currencyId == subcontractor.CurrencyId
+        || await _db.Set<SubcontractorCurrency>().AnyAsync(sc => sc.SubcontractorId == subcontractor.Id && sc.CurrencyId == currencyId, ct);
 
     /// <summary>
     /// Recomputes Load.Status from its legs' individual statuses and, if it changed,
@@ -550,24 +614,25 @@ public class LoadsController : ControllerBase
     }
 
     /// <summary>
-    /// Runs the §5.4 hard stop. Returns null when the action is allowed to proceed;
-    /// otherwise the ActionResult to return directly. An override reason is only
-    /// honoured for a caller whose JWT carries the client.creditlimit.override
-    /// function claim (§07) — resolved from their role at login, checked here via
-    /// the same policy mechanism any endpoint could use — and is written to the
-    /// audit trail either way.
+    /// Runs the §5.4 hard stop, scoped to one currency (§4.3) — the caller has already
+    /// resolved and validated currencyId against the client's allowed set before ever
+    /// reaching here. Returns null when the action is allowed to proceed; otherwise the
+    /// ActionResult to return directly. An override reason is only honoured for a
+    /// caller whose JWT carries the client.creditlimit.override function claim (§07) —
+    /// resolved from their role at login, checked here via the same policy mechanism
+    /// any endpoint could use — and is written to the audit trail either way.
     ///
-    /// KNOWN LIMITATION: this check is not atomic with the SaveChangesAsync the caller
-    /// runs afterward — see CreditExposureService's doc comment and
-    /// docs/architecture.html §5.4 for the concurrent-write race this leaves open.
+    /// The check-and-save this participates in is made atomic per client by the
+    /// caller's BeginCreditLockAsync (§5.4) — see CreditExposureService's doc comment.
     /// </summary>
     private async Task<ActionResult?> CheckCreditAsync(
         Tms.Modules.Loads.Client client,
         decimal additionalAmount,
         string? overrideReason,
+        Guid currencyId,
         CancellationToken ct)
     {
-        var status = await _creditExposure.GetStatusAsync(client, ct);
+        var status = await _creditExposure.GetStatusAsync(client, currencyId, ct);
         if (!CreditExposureService.WouldBreach(status, additionalAmount))
             return null;
 
@@ -596,6 +661,7 @@ public class LoadsController : ControllerBase
                 Reason = overrideReason,
                 NewValueJson = System.Text.Json.JsonSerializer.Serialize(new
                 {
+                    status.CurrencyId,
                     status.CreditLimit,
                     status.TotalExposure,
                     additionalAmount,
@@ -606,15 +672,18 @@ public class LoadsController : ControllerBase
             return null; // override accepted — allow the caller to proceed
         }
 
+        var currency = await _db.Currencies.FirstAsync(c => c.Id == currencyId, ct);
+
         return new ObjectResult(new ProblemDetails
         {
             Title = "Credit limit exceeded",
             Status = StatusCodes.Status422UnprocessableEntity,
-            Detail = $"Client '{client.Name}' has {status.AvailableCredit:N2} available credit " +
+            Detail = $"Client '{client.Name}' has {status.AvailableCredit:N2} {currency.Code} available credit " +
                      $"(limit {status.CreditLimit:N2}, exposure {status.TotalExposure:N2}) " +
                      $"but this action would add {additionalAmount:N2}.",
             Extensions =
             {
+                ["currencyId"] = status.CurrencyId,
                 ["creditLimit"] = status.CreditLimit,
                 ["arOutstanding"] = status.ArOutstanding,
                 ["wip"] = status.Wip,

@@ -4,11 +4,12 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Tms.Infrastructure;
 using Tms.Modules.Billing;
+using Tms.Modules.Loads;
 using Tms.Shared;
 
 namespace Tms.Api.Controllers;
 
-public record CreateSupplierInvoiceRequest(Guid SubcontractorId, string SupplierInvoiceNumber, DateOnly InvoiceDate, DateOnly ReceivedDate, decimal Amount);
+public record CreateSupplierInvoiceRequest(Guid SubcontractorId, string SupplierInvoiceNumber, DateOnly InvoiceDate, DateOnly ReceivedDate, decimal Amount, Guid? CurrencyId = null);
 public record MatchSupplierInvoiceRequest(IReadOnlyList<Guid> AccrualIds);
 public record DisputeSupplierInvoiceRequest(string Reason);
 
@@ -17,7 +18,7 @@ public record SubcontractorExpenseResponse(
     decimal Amount, SubcontractorExpenseStatus Status, DateTimeOffset FinalizedDate);
 
 public record SupplierInvoiceResponse(
-    Guid Id, Guid SubcontractorId, string SupplierInvoiceNumber, DateOnly InvoiceDate, DateOnly ReceivedDate,
+    Guid Id, Guid SubcontractorId, Guid CurrencyId, string SupplierInvoiceNumber, DateOnly InvoiceDate, DateOnly ReceivedDate,
     decimal Amount, SupplierInvoiceStatus Status, string? DisputeReason,
     IReadOnlyList<SubcontractorExpenseResponse> Expenses);
 
@@ -73,8 +74,12 @@ public class SupplierInvoicesController : ControllerBase
         if (_tenantContext.TenantId is null || _tenantContext.CompanyId is null)
             return Unauthorized("Request is missing a resolved Tenant/Company context.");
 
-        if (!await _db.Subcontractors.AnyAsync(s => s.Id == request.SubcontractorId, ct))
-            return NotFound($"Subcontractor {request.SubcontractorId} was not found.");
+        var subcontractor = await _db.Subcontractors.FirstOrDefaultAsync(s => s.Id == request.SubcontractorId, ct);
+        if (subcontractor is null) return NotFound($"Subcontractor {request.SubcontractorId} was not found.");
+
+        var currencyId = request.CurrencyId ?? subcontractor.CurrencyId;
+        if (!await IsSubcontractorCurrencyAllowedAsync(subcontractor, currencyId, ct))
+            return BadRequest($"Subcontractor is not permitted to transact in currency {currencyId} — add it via POST /subcontractors/{{id}}/currencies first.");
 
         if (await _db.SupplierInvoices.AnyAsync(
             si => si.SubcontractorId == request.SubcontractorId && si.SupplierInvoiceNumber == request.SupplierInvoiceNumber, ct))
@@ -85,6 +90,7 @@ public class SupplierInvoicesController : ControllerBase
             TenantId = _tenantContext.TenantId.Value,
             CompanyId = _tenantContext.CompanyId.Value,
             SubcontractorId = request.SubcontractorId,
+            CurrencyId = currencyId,
             SupplierInvoiceNumber = request.SupplierInvoiceNumber,
             InvoiceDate = request.InvoiceDate,
             ReceivedDate = request.ReceivedDate,
@@ -140,6 +146,8 @@ public class SupplierInvoicesController : ControllerBase
             return NotFound("One or more accruals were not found.");
         if (accruals.Any(a => a.SubcontractorId != invoice.SubcontractorId))
             return BadRequest("Every accrual must belong to the same subcontractor as the invoice.");
+        if (accruals.Any(a => a.CurrencyId != invoice.CurrencyId))
+            return BadRequest("Every accrual must be in the same currency as the invoice.");
         if (accruals.Any(a => a.Status != SubcontractorAccrualStatus.Accrued))
             return Conflict("Every accrual must still be Accrued — one has already been matched.");
 
@@ -177,6 +185,7 @@ public class SupplierInvoicesController : ControllerBase
                 TenantId = _tenantContext.TenantId.Value,
                 CompanyId = _tenantContext.CompanyId.Value,
                 SubcontractorId = invoice.SubcontractorId,
+                CurrencyId = invoice.CurrencyId,
                 RateLineBuyId = accrual.RateLineBuyId,
                 AccrualId = accrual.Id,
                 SupplierInvoiceId = invoice.Id,
@@ -215,8 +224,13 @@ public class SupplierInvoicesController : ControllerBase
         return NoContent();
     }
 
+    /// <summary>Whether a Subcontractor is permitted to transact in a given currency (§4.3) — its own primary CurrencyId, or an explicit SubcontractorCurrency allow-list row.</summary>
+    private async Task<bool> IsSubcontractorCurrencyAllowedAsync(Subcontractor subcontractor, Guid currencyId, CancellationToken ct) =>
+        currencyId == subcontractor.CurrencyId
+        || await _db.Set<SubcontractorCurrency>().AnyAsync(sc => sc.SubcontractorId == subcontractor.Id && sc.CurrencyId == currencyId, ct);
+
     private static SupplierInvoiceResponse ToResponse(SupplierInvoice invoice) => new(
-        invoice.Id, invoice.SubcontractorId, invoice.SupplierInvoiceNumber, invoice.InvoiceDate, invoice.ReceivedDate,
+        invoice.Id, invoice.SubcontractorId, invoice.CurrencyId, invoice.SupplierInvoiceNumber, invoice.InvoiceDate, invoice.ReceivedDate,
         invoice.Amount, invoice.Status, invoice.DisputeReason,
         invoice.Expenses.Select(e => new SubcontractorExpenseResponse(
             e.Id, e.RateLineBuyId, e.AccrualId, e.FinancialPeriodId, e.Amount, e.Status, e.FinalizedDate)).ToList());

@@ -9,6 +9,7 @@ using Tms.Modules.Rating;
 namespace Tms.Api.Services;
 
 public record CreditStatus(
+    Guid CurrencyId,
     decimal CreditLimit,
     decimal ArOutstanding,
     decimal Wip,
@@ -33,7 +34,16 @@ public record CreditStatus(
 /// first transaction commits or rolls back, so it always reads exposure that already
 /// reflects whatever the first one did — the two race-condition requests from the
 /// known limitation now serialize instead of both reading stale exposure. The lock is
-/// scoped per client, so different clients never contend with each other.
+/// scoped per client (not per client+currency), so it's slightly more conservative
+/// than strictly necessary for a client using two currencies at once, but still
+/// correct — different clients never contend with each other either way.
+///
+/// A client's exposure is now tracked per currency, never blended (§4.3): AR and WIP
+/// are summed only within one CurrencyId, and CreditLimit is resolved to whichever
+/// currency the caller asks about — the client's own primary CreditLimit if it's the
+/// primary currency, or a ClientCurrency row's own limit for an additional one. There
+/// is deliberately no FX conversion anywhere in this class — exactly the design choice
+/// that keeps this hard stop exact rather than an approximation of a moving rate.
 /// </summary>
 public class CreditExposureService
 {
@@ -106,16 +116,45 @@ public class CreditExposureService
         return transaction;
     }
 
-    public async Task<CreditStatus> GetStatusAsync(Client client, CancellationToken ct)
+    /// <summary>
+    /// Resolves the CreditLimit that applies to one currency for this client (§4.3) —
+    /// the client's own primary CreditLimit if currencyId is its primary CurrencyId, or
+    /// a ClientCurrency row's own limit for an additional allowed currency. Null means
+    /// this client isn't permitted to transact in that currency at all; callers use
+    /// that to reject the request before ever reaching GetStatusAsync.
+    /// </summary>
+    public async Task<decimal?> ResolveCreditLimitAsync(Client client, Guid currencyId, CancellationToken ct)
     {
+        if (currencyId == client.CurrencyId) return client.CreditLimit;
+
+        var allowed = await _db.Set<ClientCurrency>()
+            .FirstOrDefaultAsync(cc => cc.ClientId == client.Id && cc.CurrencyId == currencyId, ct);
+        return allowed?.CreditLimit;
+    }
+
+    /// <summary>
+    /// Exposure for one currency only (§4.3) — a client transacting in two currencies
+    /// has two entirely separate exposure figures, never summed together, since doing
+    /// that would require converting one into the other and reintroducing exactly the
+    /// FX-timing risk this hard stop is designed to avoid. Throws if currencyId isn't
+    /// one this client is actually permitted to use — callers (LoadsController) resolve
+    /// and validate that first via ResolveCreditLimitAsync, so reaching here with an
+    /// unresolvable currency indicates a caller bug, not a user-facing error case.
+    /// </summary>
+    public async Task<CreditStatus> GetStatusAsync(Client client, Guid currencyId, CancellationToken ct)
+    {
+        var creditLimit = await ResolveCreditLimitAsync(client, currencyId, ct)
+            ?? throw new InvalidOperationException($"Client {client.Id} is not permitted to transact in currency {currencyId}.");
+
         var arOutstanding = await _db.Set<Invoice>()
-            .Where(i => i.ClientId == client.Id && (i.Status == InvoiceStatus.Issued || i.Status == InvoiceStatus.PartPaid))
+            .Where(i => i.ClientId == client.Id && i.CurrencyId == currencyId
+                && (i.Status == InvoiceStatus.Issued || i.Status == InvoiceStatus.PartPaid))
             .SumAsync(i => i.TotalIncVat, ct);
 
         var invoicedRateLineIds = _db.Set<InvoiceLine>().Select(l => l.RateLineSellId);
 
         var wip = await _db.Set<RateLine>()
-            .Where(r => r.Direction == RateLineDirection.Sell && r.SourceType == RateLineSourceType.CommodityLine)
+            .Where(r => r.Direction == RateLineDirection.Sell && r.SourceType == RateLineSourceType.CommodityLine && r.CurrencyId == currencyId)
             .Where(r => !invoicedRateLineIds.Contains(r.Id))
             .Join(_db.Set<CommodityLine>(), r => r.SourceId, cl => cl.Id, (r, cl) => new { r, cl })
             .Join(_db.Set<LoadLeg>(), x => x.cl.LoadLegId, leg => leg.Id, (x, leg) => new { x.r, leg })
@@ -126,11 +165,12 @@ public class CreditExposureService
         var totalExposure = arOutstanding + wip;
 
         return new CreditStatus(
-            CreditLimit: client.CreditLimit,
+            CurrencyId: currencyId,
+            CreditLimit: creditLimit,
             ArOutstanding: arOutstanding,
             Wip: wip,
             TotalExposure: totalExposure,
-            AvailableCredit: client.CreditLimit - totalExposure);
+            AvailableCredit: creditLimit - totalExposure);
     }
 
     /// <summary>True if adding <paramref name="additionalAmount"/> would push Total Exposure above CreditLimit (§5.4's hard stop).</summary>
