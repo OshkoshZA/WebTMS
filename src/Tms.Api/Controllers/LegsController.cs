@@ -134,6 +134,8 @@ public class LegsController : ControllerBase
             return Conflict("This leg has already been debriefed.");
 
         var load = await _db.Loads.Include(l => l.Legs).FirstAsync(l => l.Id == leg.LoadId, ct);
+        if (load.Status is LoadStatus.OnHold or LoadStatus.Cancelled)
+            return Conflict($"Load is {load.Status}; this leg cannot be debriefed until it's released.");
 
         var incidentRequests = request.Incidents ?? Array.Empty<SubmitDebriefIncidentRequest>();
         var expenseRequests = request.Expenses ?? Array.Empty<SubmitDebriefExpenseRequest>();
@@ -222,7 +224,7 @@ public class LegsController : ControllerBase
         // figure is stored anywhere in this codebase. Flagging that honestly rather
         // than fabricating a threshold; see the class doc comment.
         var reasons = new List<string>();
-        if (!debrief.PodReceived) reasons.Add("Missing POD");
+        if (!debrief.PodReceived || string.IsNullOrWhiteSpace(debrief.PodImageUrl)) reasons.Add("Missing POD");
         if (debrief.Incidents.Count > 0) reasons.Add($"{debrief.Incidents.Count} incident(s) logged");
         if (debrief.DrivingHours is decimal hours && hours > RegulatoryDrivingHoursLimit)
             reasons.Add($"Driving hours ({hours:0.#}) exceed the regulatory limit ({RegulatoryDrivingHoursLimit:0.#})");
@@ -238,7 +240,18 @@ public class LegsController : ControllerBase
             debrief.ExceptionReasons = string.Join(", ", reasons);
         }
 
-        await _db.SaveChangesAsync(ct);
+        try
+        {
+            await _db.SaveChangesAsync(ct);
+        }
+        catch (DbUpdateException)
+        {
+            // DebriefLoadLegIndex catches a race between two concurrent Submit calls
+            // for the same leg that both passed the AnyAsync check above before either
+            // committed — turns that into a clean 409 instead of a raw 500, same
+            // pattern as SupplierInvoicesController.Create.
+            return Conflict("This leg has already been debriefed.");
+        }
 
         return CreatedAtAction(nameof(GetDebrief), new { id }, ToResponse(debrief));
     }

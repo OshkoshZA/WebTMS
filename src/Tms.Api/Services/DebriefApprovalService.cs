@@ -33,21 +33,36 @@ public class DebriefApprovalService
             .Where(e => e.ClaimedAgainst == ClaimedAgainst.SubcontractorAccrual && e.AccrualId is not null)
             .ToList();
 
-        // Validate every claim before mutating any accrual, so a mid-way failure never
-        // leaves some accruals adjusted and others not.
-        var accruals = new List<SubcontractorAccrual>();
-        foreach (var expense in claims)
+        if (claims.Count > 0)
         {
-            var accrual = await _db.Set<SubcontractorAccrual>().FirstOrDefaultAsync(a => a.Id == expense.AccrualId, ct);
-            if (accrual is null) return $"Accrual {expense.AccrualId} no longer exists.";
-            if (accrual.Status != SubcontractorAccrualStatus.Accrued)
-                return $"Accrual {expense.AccrualId} was already matched to a supplier invoice while this debrief was pending — resolve the variance manually instead.";
+            // Each claim is applied via a single atomic, server-side increment with the
+            // Accrued check baked into its own WHERE clause — not a read-then-write, so
+            // there's no window for a concurrent SupplierInvoicesController.Match on the
+            // same accrual to net it out from under this update: either this UPDATE runs
+            // first and Match's own Accrued check then correctly fails it, or Match runs
+            // first and this UPDATE affects 0 rows, caught below. A prior version read
+            // Status then wrote EstimatedAmount as two separate steps — closing exactly
+            // the class of race this codebase's own audit sweep went looking for
+            // elsewhere (SupplierInvoicesController.Match's own accrual-vs-accrual race).
+            // Wrapped in one transaction so a mid-way failure on a multi-accrual debrief
+            // never leaves some accruals adjusted and others not.
+            await using var transaction = await _db.Database.BeginTransactionAsync(ct);
 
-            accruals.Add(accrual);
+            foreach (var expense in claims)
+            {
+                var claimed = await _db.Set<SubcontractorAccrual>()
+                    .Where(a => a.Id == expense.AccrualId && a.Status == SubcontractorAccrualStatus.Accrued)
+                    .ExecuteUpdateAsync(s => s.SetProperty(a => a.EstimatedAmount, a => a.EstimatedAmount + expense.Amount), ct);
+
+                if (claimed == 0)
+                {
+                    await transaction.RollbackAsync(ct);
+                    return $"Accrual {expense.AccrualId} was already matched to a supplier invoice while this debrief was pending — resolve the variance manually instead.";
+                }
+            }
+
+            await transaction.CommitAsync(ct);
         }
-
-        for (var i = 0; i < claims.Count; i++)
-            accruals[i].EstimatedAmount += claims[i].Amount;
 
         debrief.Status = DebriefStatus.Approved;
         debrief.ResolvedByUserId = resolvedByUserId;

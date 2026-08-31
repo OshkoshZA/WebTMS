@@ -131,6 +131,15 @@ public class CreditNotesController : ControllerBase
 
         if (invoice is not null)
         {
+            // Tracks each InvoiceLineId's running claim across this request's own
+            // Lines — the per-invoice lock above only guards against a *different*
+            // transaction crediting the same line concurrently; without this, two
+            // lines in the same request both referencing the same InvoiceLineId each
+            // independently query "already credited" against the DB (still zero for
+            // both, since neither has been saved yet) and both pass, over-crediting
+            // the line by the sum of both once actually saved.
+            var pendingByInvoiceLineId = new Dictionary<Guid, decimal>();
+
             foreach (var lineRequest in request.Lines)
             {
                 var invoiceLine = invoice.Lines.FirstOrDefault(l => l.Id == lineRequest.InvoiceLineId);
@@ -143,12 +152,16 @@ public class CreditNotesController : ControllerBase
                     .Where(x => x.Status != CreditNoteStatus.Void)
                     .SumAsync(x => x.Amount, ct);
 
-                if (alreadyCredited + lineRequest.Amount > invoiceLine.Amount)
+                var pendingFromThisRequest = pendingByInvoiceLineId.GetValueOrDefault(invoiceLine.Id);
+
+                if (alreadyCredited + pendingFromThisRequest + lineRequest.Amount > invoiceLine.Amount)
                 {
                     return Conflict(
                         $"Crediting {lineRequest.Amount:N2} against invoice line {invoiceLine.Id} would exceed its original " +
-                        $"amount of {invoiceLine.Amount:N2} (already credited: {alreadyCredited:N2}).");
+                        $"amount of {invoiceLine.Amount:N2} (already credited: {alreadyCredited + pendingFromThisRequest:N2}).");
                 }
+
+                pendingByInvoiceLineId[invoiceLine.Id] = pendingFromThisRequest + lineRequest.Amount;
             }
         }
 

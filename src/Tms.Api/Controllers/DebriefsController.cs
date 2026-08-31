@@ -6,6 +6,7 @@ using Tms.Api.Services;
 using Tms.Infrastructure;
 using Tms.Modules.Audit;
 using Tms.Modules.Debrief;
+using Tms.Shared;
 
 namespace Tms.Api.Controllers;
 
@@ -24,12 +25,15 @@ public record ApproveDebriefRequest(string? ResolutionNote = null);
 public class DebriefsController : ControllerBase
 {
     private readonly TmsDbContext _db;
+    private readonly ITenantContext _tenantContext;
     private readonly ICurrentUserAccessor _currentUser;
     private readonly DebriefApprovalService _debriefApproval;
 
-    public DebriefsController(TmsDbContext db, ICurrentUserAccessor currentUser, DebriefApprovalService debriefApproval)
+    public DebriefsController(
+        TmsDbContext db, ITenantContext tenantContext, ICurrentUserAccessor currentUser, DebriefApprovalService debriefApproval)
     {
         _db = db;
+        _tenantContext = tenantContext;
         _currentUser = currentUser;
         _debriefApproval = debriefApproval;
     }
@@ -67,10 +71,25 @@ public class DebriefsController : ControllerBase
     [Authorize(Policy = "debrief.approve")]
     public async Task<IActionResult> Approve(Guid id, ApproveDebriefRequest request, CancellationToken ct)
     {
+        if (_tenantContext.TenantId is null || _tenantContext.CompanyId is null)
+            return Unauthorized("Request is missing a resolved Tenant/Company context.");
+
         var debrief = await _db.Set<Debrief>().Include(d => d.Expenses).FirstOrDefaultAsync(d => d.Id == id, ct);
         if (debrief is null) return NotFound();
         if (debrief.Status != DebriefStatus.PendingReview)
             return Conflict($"Debrief is {debrief.Status}; only a PendingReview debrief can be approved.");
+
+        // Atomically claims this debrief — only succeeds if it's still PendingReview at
+        // the instant of the UPDATE, closing a race where two concurrent Approve calls
+        // for the same debrief both pass the in-memory check above before either
+        // commits (unlike a freshly-submitted, not-yet-persisted debrief on the
+        // auto-approve path, this one is already visible to any caller holding its id).
+        var claimed = await _db.Set<Debrief>()
+            .Where(d => d.Id == id && d.Status == DebriefStatus.PendingReview)
+            .ExecuteUpdateAsync(s => s.SetProperty(d => d.Status, DebriefStatus.Approved), ct);
+
+        if (claimed == 0)
+            return Conflict("This debrief was already resolved by a concurrent request.");
 
         var leg = await _db.LoadLegs.FirstAsync(l => l.Id == debrief.LoadLegId, ct);
         var load = await _db.Loads.Include(l => l.Legs).FirstAsync(l => l.Id == leg.LoadId, ct);
