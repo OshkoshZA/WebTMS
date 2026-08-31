@@ -8,6 +8,7 @@ using Tms.Api.Services;
 using Tms.Infrastructure;
 using Tms.Modules.Audit;
 using Tms.Modules.Billing;
+using Tms.Modules.Fleet;
 using Tms.Modules.Loads;
 using Tms.Modules.Rating;
 using Tms.Shared;
@@ -180,10 +181,20 @@ public class LoadsController : ControllerBase
         if (request.ExecutionType == LoadLegExecutionType.OwnFleet && request.SubcontractorId is not null)
             return BadRequest("An OwnFleet leg cannot also carry a SubcontractorId.");
 
-        if (request.VehicleId is Guid vehicleId && !await _db.Vehicles.AnyAsync(v => v.Id == vehicleId, ct))
-            return NotFound($"Vehicle {vehicleId} was not found.");
-        if (request.DriverId is Guid driverId && !await _db.Drivers.AnyAsync(d => d.Id == driverId, ct))
-            return NotFound($"Driver {driverId} was not found.");
+        if (request.VehicleId is Guid vehicleId)
+        {
+            var requestedVehicle = await _db.Vehicles.FirstOrDefaultAsync(v => v.Id == vehicleId, ct);
+            if (requestedVehicle is null) return NotFound($"Vehicle {vehicleId} was not found.");
+            if (requestedVehicle.Status == VehicleStatus.Deactivated)
+                return Conflict($"Vehicle '{requestedVehicle.FleetNo}' is deactivated; it cannot be allocated to a new leg.");
+        }
+        if (request.DriverId is Guid driverId)
+        {
+            var requestedDriver = await _db.Drivers.FirstOrDefaultAsync(d => d.Id == driverId, ct);
+            if (requestedDriver is null) return NotFound($"Driver {driverId} was not found.");
+            if (requestedDriver.Status == DriverStatus.Deactivated)
+                return Conflict($"Driver '{requestedDriver.Name}' is deactivated; it cannot be allocated to a new leg.");
+        }
         if (request.SubcontractorId is Guid subcontractorId)
         {
             var requestedSubcontractor = await _db.Subcontractors.FirstOrDefaultAsync(s => s.Id == subcontractorId, ct);
@@ -285,10 +296,16 @@ public class LoadsController : ControllerBase
         {
             if (request.VehicleId is null || request.DriverId is null || request.SubcontractorId is not null)
                 return BadRequest("An OwnFleet leg is allocated with VehicleId and DriverId only.");
-            if (!await _db.Vehicles.AnyAsync(v => v.Id == request.VehicleId, ct))
-                return NotFound($"Vehicle {request.VehicleId} was not found.");
-            if (!await _db.Drivers.AnyAsync(d => d.Id == request.DriverId, ct))
-                return NotFound($"Driver {request.DriverId} was not found.");
+
+            var vehicle = await _db.Vehicles.FirstOrDefaultAsync(v => v.Id == request.VehicleId, ct);
+            if (vehicle is null) return NotFound($"Vehicle {request.VehicleId} was not found.");
+            if (vehicle.Status == VehicleStatus.Deactivated)
+                return Conflict($"Vehicle '{vehicle.FleetNo}' is deactivated; it cannot be allocated to a new leg.");
+
+            var driver = await _db.Drivers.FirstOrDefaultAsync(d => d.Id == request.DriverId, ct);
+            if (driver is null) return NotFound($"Driver {request.DriverId} was not found.");
+            if (driver.Status == DriverStatus.Deactivated)
+                return Conflict($"Driver '{driver.Name}' is deactivated; it cannot be allocated to a new leg.");
 
             leg.VehicleId = request.VehicleId;
             leg.DriverId = request.DriverId;

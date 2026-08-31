@@ -42,6 +42,22 @@ public class RolesController : ControllerBase
         _tenantContext = tenantContext;
     }
 
+    // "PlatformSupport" isn't a role this codebase ever seeds or otherwise
+    // provisions — TenantContextMiddleware.IsPlatformSupport is a pure
+    // string match on the role claim's Name, and IsPlatformSupportBypass then
+    // disables every tenant/company query filter in TmsDbContext for that
+    // request, app-wide. Since ApplicationRole.Name is only unique per-tenant
+    // (not globally) and ordinary tenant admins already hold the completely
+    // routine identity.role.manage + identity.user.manage functions, an
+    // unreserved name here would let any tenant escalate itself to full
+    // cross-tenant read/write by creating a role with this exact name and
+    // assigning it to a user — defeating the doc's own §07 guarantee that "no
+    // role, including admin roles, is able to cross a tenant boundary."
+    private static readonly string[] ReservedRoleNames = { "PlatformSupport" };
+
+    private static bool IsReservedRoleName(string name) =>
+        ReservedRoleNames.Any(reserved => string.Equals(reserved, name, StringComparison.OrdinalIgnoreCase));
+
     [HttpGet]
     public async Task<ActionResult<IEnumerable<RoleResponse>>> List(CancellationToken ct)
     {
@@ -67,6 +83,9 @@ public class RolesController : ControllerBase
     {
         if (_tenantContext.TenantId is null)
             return Unauthorized("Request is missing a resolved Tenant context.");
+
+        if (IsReservedRoleName(request.Name))
+            return BadRequest($"'{request.Name}' is a reserved role name and cannot be created here.");
 
         var role = new ApplicationRole { Name = request.Name, TenantId = _tenantContext.TenantId.Value };
 
@@ -119,6 +138,15 @@ public class RolesController : ControllerBase
     [Authorize(Policy = "identity.role.manage")]
     public async Task<IActionResult> RevokeFunction(Guid id, Guid functionId, CancellationToken ct)
     {
+        // RoleFunction carries no TenantId of its own and isn't query-filtered — unlike
+        // GrantFunction, which loads the role through the tenant-filtered _db.Roles set
+        // first, this used to look the grant up directly by RoleId, so a caller holding
+        // identity.role.manage in their own tenant could revoke a function grant from a
+        // role belonging to a *different* tenant, given that tenant's RoleId. Loading
+        // the role first, the same way GrantFunction already does, closes that gap.
+        var role = await _db.Roles.FirstOrDefaultAsync(r => r.Id == id, ct);
+        if (role is null) return NotFound();
+
         var grant = await _db.RoleFunctions.FirstOrDefaultAsync(rf => rf.RoleId == id && rf.FunctionId == functionId, ct);
         if (grant is null) return NotFound();
 

@@ -85,9 +85,32 @@ public class FinancialPeriodsController : ControllerBase
                 "No Future period follows this one. Create the next FinancialYear (POST /financial-years) before closing the last period of this one.");
         }
 
-        period.Status = FinancialPeriodStatus.Closed;
-        period.ClosedAt = DateTimeOffset.UtcNow;
-        period.ClosedByUserId = _currentUser.UserId;
+        await using var transaction = await _db.Database.BeginTransactionAsync(ct);
+
+        // Atomically claims this period — only succeeds if it's still Open at the
+        // instant of the UPDATE. Without this, two concurrent Close calls for the same
+        // period both pass the in-memory Status check above and each write a full,
+        // duplicate set of DebtorsAgingSnapshot rows below — no unique index protects
+        // that table, so a plain double-insert goes undetected rather than throwing.
+        // FinancialPeriodOneOpenPerCompanyIndex alone doesn't catch this: it only
+        // guards two *different* periods becoming Open at once, not the same period
+        // being closed twice. Deliberately not mirrored onto the tracked `period`
+        // entity below — it still carries the stale (unset) ClosedAt/ClosedByUserId in
+        // memory, and marking it Modified would make SaveChangesAsync overwrite the
+        // values this claim just wrote with those stale nulls.
+        var claimed = await _db.FinancialPeriods
+            .Where(p => p.Id == id && p.Status == FinancialPeriodStatus.Open)
+            .ExecuteUpdateAsync(s => s
+                .SetProperty(p => p.Status, FinancialPeriodStatus.Closed)
+                .SetProperty(p => p.ClosedAt, DateTimeOffset.UtcNow)
+                .SetProperty(p => p.ClosedByUserId, _currentUser.UserId), ct);
+
+        if (claimed == 0)
+        {
+            await transaction.RollbackAsync(ct);
+            return Conflict("This period was already closed by a concurrent request.");
+        }
+
         nextPeriod.Status = FinancialPeriodStatus.Open;
 
         if (period.FinancialYearId != nextPeriod.FinancialYearId)
@@ -106,6 +129,7 @@ public class FinancialPeriodsController : ControllerBase
         try
         {
             await _db.SaveChangesAsync(ct);
+            await transaction.CommitAsync(ct);
         }
         catch (DbUpdateException)
         {
@@ -113,7 +137,8 @@ public class FinancialPeriodsController : ControllerBase
             // concurrent Close (or Close/Create) calls that both read "no other Open
             // period" before either committed — turns a real double-open into a clean
             // 409 instead of a raw 500.
-            return Conflict("This period was already closed, or another period was already opened, by a concurrent request.");
+            await transaction.RollbackAsync(ct);
+            return Conflict("Another period was already opened by a concurrent request.");
         }
 
         return NoContent();

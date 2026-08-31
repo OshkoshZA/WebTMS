@@ -189,6 +189,26 @@ public class SupplierInvoicesController : ControllerBase
             centsShare[index] += 1;
         }
 
+        await using var transaction = await _db.Database.BeginTransactionAsync(ct);
+
+        // Atomically claims this invoice — only succeeds if it's still Received at the
+        // instant of the UPDATE. Without this, two concurrent Match calls against the
+        // same invoice but with *disjoint* AccrualIds (e.g. two AP clerks each matching
+        // a different subset of legs) would both pass the in-memory Status check above
+        // and both apportion the invoice's *full* Amount, double-posting the payable —
+        // SubcontractorExpenseAccrualIndex only protects a shared accrual, not this
+        // per-invoice case. Same pattern as DebriefApprovalService's accrual claims.
+        var claimed = await _db.SupplierInvoices
+            .Where(si => si.Id == id && si.Status == SupplierInvoiceStatus.Received)
+            .ExecuteUpdateAsync(s => s.SetProperty(si => si.Status, SupplierInvoiceStatus.Matched), ct);
+
+        if (claimed == 0)
+        {
+            await transaction.RollbackAsync(ct);
+            return Conflict("This supplier invoice was already resolved by a concurrent request.");
+        }
+        invoice.Status = SupplierInvoiceStatus.Matched; // keep the tracked entity in sync for the response DTO
+
         for (var i = 0; i < accruals.Count; i++)
         {
             var accrual = accruals[i];
@@ -217,11 +237,10 @@ public class SupplierInvoicesController : ControllerBase
             });
         }
 
-        invoice.Status = SupplierInvoiceStatus.Matched;
-
         try
         {
             await _db.SaveChangesAsync(ct);
+            await transaction.CommitAsync(ct);
         }
         catch (DbUpdateException)
         {
@@ -229,6 +248,7 @@ public class SupplierInvoicesController : ControllerBase
             // Match calls that both read the same accrual as still Accrued before
             // either committed — turns a real double-net into a clean 409 instead of
             // a raw 500, same pattern as SupplierInvoiceNumberIndex above.
+            await transaction.RollbackAsync(ct);
             return Conflict("One or more of these accruals were already matched by a concurrent request.");
         }
 
@@ -253,10 +273,21 @@ public class SupplierInvoicesController : ControllerBase
         if (invoice.Status != SupplierInvoiceStatus.Received)
             return Conflict($"Supplier invoice is {invoice.Status}; only a Received invoice can be disputed.");
 
-        invoice.Status = SupplierInvoiceStatus.Disputed;
-        invoice.DisputeReason = request.Reason;
+        // Atomically claims this invoice — closes a race against a concurrent Match
+        // call on the same invoice: without this, Dispute could read Status ==
+        // Received, lose the race to a Match that nets the accruals and commits first,
+        // then still blindly overwrite Status to Disputed with no error — leaving an
+        // invoice marked Disputed even though its accruals are already Netted and its
+        // expenses already posted. Same claim pattern as Match itself.
+        var claimed = await _db.SupplierInvoices
+            .Where(si => si.Id == id && si.Status == SupplierInvoiceStatus.Received)
+            .ExecuteUpdateAsync(s => s
+                .SetProperty(si => si.Status, SupplierInvoiceStatus.Disputed)
+                .SetProperty(si => si.DisputeReason, request.Reason), ct);
 
-        await _db.SaveChangesAsync(ct);
+        if (claimed == 0)
+            return Conflict("This supplier invoice was already resolved by a concurrent request.");
+
         return NoContent();
     }
 

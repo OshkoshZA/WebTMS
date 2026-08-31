@@ -146,7 +146,19 @@ public class ClientsController : ControllerBase
             CreditLimit = request.CreditLimit
         };
         _db.Set<ClientCurrency>().Add(clientCurrency);
-        await _db.SaveChangesAsync(ct);
+
+        try
+        {
+            await _db.SaveChangesAsync(ct);
+        }
+        catch (DbUpdateException)
+        {
+            // ClientCurrencyIndex catches a race between two concurrent AddCurrency
+            // calls for the same (Client, Currency) pair that both passed the AnyAsync
+            // check above — turns that into a clean 409 instead of a raw 500, same
+            // pattern as SupplierInvoicesController.Create.
+            return Conflict("This client is already permitted to transact in that currency.");
+        }
 
         return CreatedAtAction(nameof(Currencies), new { id }, clientCurrency);
     }
@@ -172,6 +184,19 @@ public class ClientsController : ControllerBase
         if (client is null) return NotFound();
 
         client.Status = ClientStatus.Deactivated; // never a hard delete — §11.5
+        await _db.SaveChangesAsync(ct);
+        return NoContent();
+    }
+
+    /// <summary>Reverses a Deactivate — the only path back to Active, mirroring how Deactivate is the only path out of it (the same pattern CommoditiesController/CostCentresController/DriversController/VehiclesController/LocationsController already follow; LoadsController.Create's own "reactivate it before booking a new load" error message assumes this exists).</summary>
+    [HttpPost("{id:guid}/reactivate")]
+    [Authorize(Policy = "client.master.manage")]
+    public async Task<IActionResult> Reactivate(Guid id, CancellationToken ct)
+    {
+        var client = await _db.Clients.FirstOrDefaultAsync(c => c.Id == id, ct);
+        if (client is null) return NotFound();
+
+        client.Status = ClientStatus.Active;
         await _db.SaveChangesAsync(ct);
         return NoContent();
     }

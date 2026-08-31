@@ -107,6 +107,19 @@ public class SubcontractorsController : ControllerBase
         return NoContent();
     }
 
+    /// <summary>Reverses a Deactivate — the only path back to Active, mirroring how Deactivate is the only path out of it (the same pattern CommoditiesController/CostCentresController/DriversController/VehiclesController/LocationsController already follow; LoadsController.AddLeg/AllocateLeg's own "deactivated; it cannot be allocated" error messages assume this exists).</summary>
+    [HttpPost("{id:guid}/reactivate")]
+    [Authorize(Policy = "subcontractor.master.manage")]
+    public async Task<IActionResult> Reactivate(Guid id, CancellationToken ct)
+    {
+        var subcontractor = await _db.Subcontractors.FirstOrDefaultAsync(s => s.Id == id, ct);
+        if (subcontractor is null) return NotFound();
+
+        subcontractor.Status = SubcontractorStatus.Active;
+        await _db.SaveChangesAsync(ct);
+        return NoContent();
+    }
+
     /// <summary>Currencies this subcontractor is permitted to be paid in, beyond its primary — its own CurrencyId is always implicitly allowed and isn't listed here (docs/architecture.html §4.3).</summary>
     [HttpGet("{id:guid}/currencies")]
     public async Task<ActionResult<IEnumerable<SubcontractorCurrency>>> Currencies(Guid id, CancellationToken ct)
@@ -143,7 +156,19 @@ public class SubcontractorsController : ControllerBase
             CurrencyId = request.CurrencyId
         };
         _db.Set<SubcontractorCurrency>().Add(subcontractorCurrency);
-        await _db.SaveChangesAsync(ct);
+
+        try
+        {
+            await _db.SaveChangesAsync(ct);
+        }
+        catch (DbUpdateException)
+        {
+            // SubcontractorCurrencyIndex catches a race between two concurrent
+            // AddCurrency calls for the same (Subcontractor, Currency) pair that both
+            // passed the AnyAsync check above — turns that into a clean 409 instead of
+            // a raw 500, same pattern as SupplierInvoicesController.Create.
+            return Conflict("This subcontractor is already permitted to be paid in that currency.");
+        }
 
         return CreatedAtAction(nameof(Currencies), new { id }, subcontractorCurrency);
     }

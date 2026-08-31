@@ -41,6 +41,18 @@ public class AuthController : ControllerBase
     private readonly JwtTokenService _tokenService;
     private readonly RefreshTokenService _refreshTokens;
 
+    // A nonexistent email used to short-circuit Login before the (comparatively
+    // expensive) PBKDF2 hash verification ran at all, making that attempt
+    // measurably faster than a real-email/wrong-password one despite both
+    // returning the identical "Invalid email or password" message — a timing
+    // side-channel an attacker could use to enumerate valid emails independent of
+    // the auth rate limiter. Verifying against this fixed dummy hash on the
+    // nonexistent-email path keeps its cost comparable to the real one; the user
+    // parameter is unused by the default PasswordHasher implementation, so null is
+    // fine here.
+    private static readonly IPasswordHasher<ApplicationUser> DummyPasswordHasher = new PasswordHasher<ApplicationUser>();
+    private static readonly string DummyPasswordHash = DummyPasswordHasher.HashPassword(null!, Guid.NewGuid().ToString());
+
     public AuthController(
         UserManager<ApplicationUser> userManager,
         TmsDbContext db,
@@ -58,7 +70,12 @@ public class AuthController : ControllerBase
     public async Task<ActionResult<LoginResponse>> Login(LoginRequest request, CancellationToken ct)
     {
         var user = await _userManager.FindByEmailAsync(request.Email);
-        if (user is null || !await _userManager.CheckPasswordAsync(user, request.Password))
+        if (user is null)
+        {
+            DummyPasswordHasher.VerifyHashedPassword(null!, DummyPasswordHash, request.Password);
+            return Unauthorized("Invalid email or password.");
+        }
+        if (!await _userManager.CheckPasswordAsync(user, request.Password))
             return Unauthorized("Invalid email or password.");
 
         if (user.Status == UserStatus.Deactivated)

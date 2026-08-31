@@ -208,6 +208,17 @@ public class UsersController : ControllerBase
     [Authorize(Policy = "identity.user.manage")]
     public async Task<IActionResult> RemoveCompanyRole(Guid id, Guid companyRoleId, CancellationToken ct)
     {
+        // UserCompanyRole carries no TenantId of its own and isn't query-filtered —
+        // unlike every other mutating action in this controller (Update, Deactivate,
+        // Reactivate, AddCompanyRole), this used to look the assignment up directly by
+        // UserId, so a caller holding identity.user.manage in their own tenant could
+        // remove a role assignment from a user belonging to a *different* tenant,
+        // given that tenant's UserId + UserCompanyRole.Id. Loading the user first
+        // through the tenant-filtered _db.Users set, the same way AddCompanyRole
+        // already does, closes that gap.
+        var user = await _db.Users.FirstOrDefaultAsync(u => u.Id == id, ct);
+        if (user is null) return NotFound();
+
         var assignment = await _db.UserCompanyRoles.FirstOrDefaultAsync(ucr => ucr.Id == companyRoleId && ucr.UserId == id, ct);
         if (assignment is null) return NotFound();
 
