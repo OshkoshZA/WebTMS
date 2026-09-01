@@ -267,7 +267,9 @@ public static class DevelopmentSeeder
             ("debrief.approve",
              "Resolve a PendingReview Debrief — a Debrief Clerk function, distinct from submitting one, which any authenticated user (or driver mobile web) can do (§09)."),
             ("expensetype.master.manage",
-             "Create, update, deactivate, and reactivate ExpenseType master data (§9.1).")
+             "Create, update, deactivate, and reactivate ExpenseType master data (§9.1)."),
+            ("exception.manage",
+             "Acknowledge and resolve an Exception raised by any module against the shared §16.1 mechanism.")
         };
 
         var adminRole = await roleManager.FindByNameAsync(AdminRoleName);

@@ -2,8 +2,10 @@ using Asp.Versioning;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using Tms.Api.Services;
 using Tms.Infrastructure;
 using Tms.Modules.Billing;
+using Tms.Modules.Exceptions;
 using Tms.Modules.Loads;
 using Tms.Shared;
 
@@ -40,11 +42,13 @@ public class SupplierInvoicesController : ControllerBase
 {
     private readonly TmsDbContext _db;
     private readonly ITenantContext _tenantContext;
+    private readonly ExceptionService _exceptions;
 
-    public SupplierInvoicesController(TmsDbContext db, ITenantContext tenantContext)
+    public SupplierInvoicesController(TmsDbContext db, ITenantContext tenantContext, ExceptionService exceptions)
     {
         _db = db;
         _tenantContext = tenantContext;
+        _exceptions = exceptions;
     }
 
     [HttpGet]
@@ -208,6 +212,17 @@ public class SupplierInvoicesController : ControllerBase
             return Conflict("This supplier invoice was already resolved by a concurrent request.");
         }
         invoice.Status = SupplierInvoiceStatus.Matched; // keep the tracked entity in sync for the response DTO
+
+        if (varianceAmount != 0m)
+        {
+            // Feeds §16.1's shared dashboard mechanism (Fig. 13's "Accrual / invoice
+            // variance" source) — flagged for review per this section's own wording,
+            // never blocking the match itself.
+            _exceptions.Raise(
+                _tenantContext.TenantId.Value, _tenantContext.CompanyId.Value, "AccrualVariance", ExceptionSeverity.Warning,
+                nameof(SupplierInvoice), invoice.Id,
+                $"Invoice {invoice.SupplierInvoiceNumber}: invoiced {invoice.Amount:N2} vs. accrued {totalEstimated:N2} — variance {varianceAmount:N2}.");
+        }
 
         for (var i = 0; i < accruals.Count; i++)
         {

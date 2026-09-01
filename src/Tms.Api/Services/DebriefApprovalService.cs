@@ -18,11 +18,13 @@ public class DebriefApprovalService
 {
     private readonly TmsDbContext _db;
     private readonly LoadStatusService _loadStatus;
+    private readonly ExceptionService _exceptions;
 
-    public DebriefApprovalService(TmsDbContext db, LoadStatusService loadStatus)
+    public DebriefApprovalService(TmsDbContext db, LoadStatusService loadStatus, ExceptionService exceptions)
     {
         _db = db;
         _loadStatus = loadStatus;
+        _exceptions = exceptions;
     }
 
     /// <summary>Returns null on success, or an error message the caller should return as a Conflict — e.g. an accrual this debrief claimed against got matched to a supplier invoice by an unrelated request while it sat PendingReview.</summary>
@@ -70,6 +72,11 @@ public class DebriefApprovalService
 
         leg.Status = LoadLegStatus.PodReceived;
         await _loadStatus.RecomputeAsync(load, ct);
+
+        // Closes out §16.1's shared Exception, if this debrief ever raised one (it
+        // didn't, on the auto-approve path — nothing to resolve there, and this is a
+        // no-op).
+        await _exceptions.ResolveByEntityAsync(nameof(Debrief), debrief.Id, ct);
 
         return null;
     }

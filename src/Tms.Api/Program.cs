@@ -30,6 +30,7 @@ builder.Services.AddScoped<Tms.Api.Auth.RefreshTokenService>();
 builder.Services.AddScoped<Tms.Api.Services.CreditExposureService>();
 builder.Services.AddScoped<Tms.Api.Services.LoadStatusService>();
 builder.Services.AddScoped<Tms.Api.Services.DebriefApprovalService>();
+builder.Services.AddScoped<Tms.Api.Services.ExceptionService>();
 
 // --- Database (§4.1: EF Core global query filters are the application-layer half of
 // tenant isolation; SQL Server Row-Level Security is the second, independent layer

@@ -7,6 +7,7 @@ using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Tms.Modules.Audit;
 using Tms.Modules.Billing;
 using Tms.Modules.Debrief;
+using Tms.Modules.Exceptions;
 using Tms.Modules.Fleet;
 using Tms.Modules.Identity;
 using Tms.Modules.Loads;
@@ -123,6 +124,9 @@ public class TmsDbContext : IdentityDbContext<ApplicationUser, ApplicationRole, 
 
     // Privacy (§14)
     public DbSet<RetentionPolicy> RetentionPolicies => Set<RetentionPolicy>();
+
+    // Exceptions (§16.1) — the shared cross-module attention mechanism
+    public DbSet<ExceptionRecord> ExceptionRecords => Set<ExceptionRecord>();
 
     // Audit (§12) — append-only; see AuditSaveChangesInterceptor
     public DbSet<AuditEntry> AuditEntries => Set<AuditEntry>();
@@ -292,6 +296,12 @@ public class TmsDbContext : IdentityDbContext<ApplicationUser, ApplicationRole, 
         modelBuilder.Entity<Modules.Debrief.Debrief>().Property(d => d.FuelCost).HasPrecision(18, 2);
         modelBuilder.Entity<Modules.Debrief.Debrief>().Property(d => d.DrivingHours).HasPrecision(18, 2);
         modelBuilder.Entity<DebriefExpense>().Property(e => e.Amount).HasPrecision(18, 2);
+
+        // Fast "open exceptions for this dashboard" lookups (§16.1) and fast
+        // resolve-by-entity lookups (ExceptionService.ResolveByEntityAsync), e.g.
+        // resolving a Debrief's exception the moment it's approved.
+        modelBuilder.Entity<ExceptionRecord>().HasIndex(e => new { e.CompanyId, e.Status });
+        modelBuilder.Entity<ExceptionRecord>().HasIndex(e => new { e.EntityType, e.EntityId });
 
         ApplyTenancyScopeFilters(modelBuilder);
 

@@ -8,6 +8,7 @@ using Tms.Api.Services;
 using Tms.Infrastructure;
 using Tms.Modules.Audit;
 using Tms.Modules.Billing;
+using Tms.Modules.Exceptions;
 using Tms.Modules.Fleet;
 using Tms.Modules.Loads;
 using Tms.Modules.Rating;
@@ -66,6 +67,7 @@ public class LoadsController : ControllerBase
     private readonly CreditExposureService _creditExposure;
     private readonly LoadStatusService _loadStatus;
     private readonly IAuthorizationService _authorizationService;
+    private readonly ExceptionService _exceptions;
 
     public LoadsController(
         TmsDbContext db,
@@ -73,7 +75,8 @@ public class LoadsController : ControllerBase
         ICurrentUserAccessor currentUser,
         CreditExposureService creditExposure,
         LoadStatusService loadStatus,
-        IAuthorizationService authorizationService)
+        IAuthorizationService authorizationService,
+        ExceptionService exceptions)
     {
         _db = db;
         _tenantContext = tenantContext;
@@ -81,6 +84,7 @@ public class LoadsController : ControllerBase
         _currentUser = currentUser;
         _creditExposure = creditExposure;
         _loadStatus = loadStatus;
+        _exceptions = exceptions;
     }
 
     [HttpGet]
@@ -721,6 +725,14 @@ public class LoadsController : ControllerBase
                     Projected = status.TotalExposure + additionalAmount
                 })
             });
+
+            // Feeds §16.1's shared dashboard mechanism (Fig. 13's "Credit hard-stop /
+            // override" source) — a bypassed hard stop is exactly the kind of thing a
+            // dashboard should be able to surface without bespoke per-module logic.
+            _exceptions.Raise(
+                client.TenantId, client.CompanyId, "CreditOverride", ExceptionSeverity.Warning,
+                nameof(Tms.Modules.Loads.Client), client.Id,
+                $"Credit limit overridden for {additionalAmount:N2} — reason: {overrideReason}");
 
             return null; // override accepted — allow the caller to proceed
         }

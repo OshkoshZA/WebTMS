@@ -25,6 +25,7 @@
     <ProjectReference Include="..\Tms.Modules.Rating\Tms.Modules.Rating.csproj" />
     <ProjectReference Include="..\Tms.Modules.Audit\Tms.Modules.Audit.csproj" />
     <ProjectReference Include="..\Tms.Modules.Billing\Tms.Modules.Billing.csproj" />
+    <ProjectReference Include="..\Tms.Modules.Exceptions\Tms.Modules.Exceptions.csproj" />
   </ItemGroup>
 
 </Project>

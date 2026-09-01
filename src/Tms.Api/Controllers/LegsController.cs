@@ -5,6 +5,7 @@ using Microsoft.EntityFrameworkCore;
 using Tms.Api.Services;
 using Tms.Infrastructure;
 using Tms.Modules.Debrief;
+using Tms.Modules.Exceptions;
 using Tms.Modules.Loads;
 using Tms.Modules.Rating;
 using Tms.Shared;
@@ -63,12 +64,15 @@ public class LegsController : ControllerBase
     private readonly TmsDbContext _db;
     private readonly ITenantContext _tenantContext;
     private readonly DebriefApprovalService _debriefApproval;
+    private readonly ExceptionService _exceptions;
 
-    public LegsController(TmsDbContext db, ITenantContext tenantContext, DebriefApprovalService debriefApproval)
+    public LegsController(
+        TmsDbContext db, ITenantContext tenantContext, DebriefApprovalService debriefApproval, ExceptionService exceptions)
     {
         _db = db;
         _tenantContext = tenantContext;
         _debriefApproval = debriefApproval;
+        _exceptions = exceptions;
     }
 
     /// <summary>Retrieves a leg's Load Confirmation (§8.2) — PdfUrl is null for now, since there's no PDF-rendering infrastructure in this codebase yet.</summary>
@@ -238,6 +242,13 @@ public class LegsController : ControllerBase
         {
             debrief.Status = DebriefStatus.PendingReview;
             debrief.ExceptionReasons = string.Join(", ", reasons);
+
+            // Feeds §16.1's shared dashboard mechanism — resolved by
+            // DebriefApprovalService.ApproveAsync the moment a Debrief Clerk (or the
+            // auto-approve path, on some later resubmission model) approves it.
+            _exceptions.Raise(
+                debrief.TenantId, debrief.CompanyId, "Debrief", ExceptionSeverity.Warning,
+                nameof(Debrief), debrief.Id, debrief.ExceptionReasons);
         }
 
         try
