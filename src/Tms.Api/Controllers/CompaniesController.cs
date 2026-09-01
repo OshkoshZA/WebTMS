@@ -28,19 +28,28 @@ public record UpdateCompanyRequest(
 public class CompaniesController : ControllerBase
 {
     private readonly TmsDbContext _db;
+    private readonly ITenantContext _tenantContext;
 
-    public CompaniesController(TmsDbContext db)
+    public CompaniesController(TmsDbContext db, ITenantContext tenantContext)
     {
         _db = db;
+        _tenantContext = tenantContext;
     }
 
+    /// <summary>Never part of either portal's documented scope, and this is the tenant's own letterhead master data (BankingDetails, VatNumber, RegistrationNo included) — any portal contact is Forbidden outright.</summary>
     [HttpGet]
     public async Task<ActionResult<IEnumerable<Company>>> List(CancellationToken ct)
-        => Ok(await _db.Companies.OrderBy(c => c.LegalName).ToListAsync(ct));
+    {
+        if (_tenantContext.SubcontractorId is not null || _tenantContext.ClientId is not null) return Forbid();
+
+        return Ok(await _db.Companies.OrderBy(c => c.LegalName).ToListAsync(ct));
+    }
 
     [HttpGet("{id:guid}")]
     public async Task<ActionResult<Company>> Get(Guid id, CancellationToken ct)
     {
+        if (_tenantContext.SubcontractorId is not null || _tenantContext.ClientId is not null) return Forbid();
+
         var company = await _db.Companies.FirstOrDefaultAsync(c => c.Id == id, ct);
         return company is null ? NotFound() : Ok(company);
     }

@@ -144,9 +144,11 @@ public class FinancialPeriodsController : ControllerBase
         return NoContent();
     }
 
+    /// <summary>Never part of either portal's documented scope — returns every Client's aged-debt buckets in one call with no per-client filter, so any portal contact is Forbidden outright (a Customer Portal contact's own AR view is ClientsController.CreditStatus instead).</summary>
     [HttpGet("{id:guid}/debtors-aging")]
     public async Task<ActionResult<IEnumerable<DebtorsAgingSnapshotResponse>>> DebtorsAging(Guid id, CancellationToken ct)
     {
+        if (_tenantContext.SubcontractorId is not null || _tenantContext.ClientId is not null) return Forbid();
         if (!await _db.FinancialPeriods.AnyAsync(p => p.Id == id, ct))
             return NotFound();
 

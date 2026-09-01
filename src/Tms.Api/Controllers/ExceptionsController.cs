@@ -33,16 +33,28 @@ public class ExceptionsController : ControllerBase
 {
     private readonly TmsDbContext _db;
     private readonly ICurrentUserAccessor _currentUser;
+    private readonly ITenantContext _tenantContext;
 
-    public ExceptionsController(TmsDbContext db, ICurrentUserAccessor currentUser)
+    public ExceptionsController(TmsDbContext db, ICurrentUserAccessor currentUser, ITenantContext tenantContext)
     {
         _db = db;
         _currentUser = currentUser;
+        _tenantContext = tenantContext;
     }
 
+    /// <summary>
+    /// Never part of either portal's documented scope — the ClientContact/
+    /// SubcontractorContact scoped exception views §16.1 itself describes need row-level
+    /// scoping this table doesn't have (an ExceptionRecord names an EntityType/EntityId,
+    /// not a Client/Subcontractor directly), so rather than build that out speculatively,
+    /// any portal contact is Forbidden outright — the company-wide internal dashboard
+    /// view stays internal-staff-only until that scoping is actually built.
+    /// </summary>
     [HttpGet]
     public async Task<ActionResult<IEnumerable<ExceptionResponse>>> List(ExceptionStatus? status, CancellationToken ct)
     {
+        if (_tenantContext.SubcontractorId is not null || _tenantContext.ClientId is not null) return Forbid();
+
         // No explicit tenant/company filtering here — TmsDbContext's global query
         // filters (§4.1) already scope this to the caller's own company, the same
         // convention every other List action in this codebase follows.
@@ -56,6 +68,8 @@ public class ExceptionsController : ControllerBase
     [HttpGet("{id:guid}")]
     public async Task<ActionResult<ExceptionResponse>> Get(Guid id, CancellationToken ct)
     {
+        if (_tenantContext.SubcontractorId is not null || _tenantContext.ClientId is not null) return Forbid();
+
         var record = await _db.Set<ExceptionRecord>().FirstOrDefaultAsync(e => e.Id == id, ct);
         return record is null ? NotFound() : Ok(ToResponse(record));
     }

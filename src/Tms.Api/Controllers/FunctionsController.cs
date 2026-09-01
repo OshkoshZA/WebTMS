@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Tms.Infrastructure;
+using Tms.Shared;
 
 namespace Tms.Api.Controllers;
 
@@ -19,16 +20,23 @@ namespace Tms.Api.Controllers;
 public class FunctionsController : ControllerBase
 {
     private readonly TmsDbContext _db;
+    private readonly ITenantContext _tenantContext;
 
-    public FunctionsController(TmsDbContext db)
+    public FunctionsController(TmsDbContext db, ITenantContext tenantContext)
     {
         _db = db;
+        _tenantContext = tenantContext;
     }
 
+    /// <summary>Never part of either portal's documented scope — internal capability names/descriptions aren't meant for an external contact, so any portal contact is Forbidden outright.</summary>
     [HttpGet]
     public async Task<ActionResult<IEnumerable<FunctionResponse>>> List(CancellationToken ct)
-        => Ok(await _db.Functions
+    {
+        if (_tenantContext.SubcontractorId is not null || _tenantContext.ClientId is not null) return Forbid();
+
+        return Ok(await _db.Functions
             .OrderBy(f => f.Code)
             .Select(f => new FunctionResponse(f.Id, f.Code, f.Description))
             .ToListAsync(ct));
+    }
 }

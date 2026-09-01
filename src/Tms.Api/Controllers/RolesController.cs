@@ -58,9 +58,12 @@ public class RolesController : ControllerBase
     private static bool IsReservedRoleName(string name) =>
         ReservedRoleNames.Any(reserved => string.Equals(reserved, name, StringComparison.OrdinalIgnoreCase));
 
+    /// <summary>Never part of either portal's documented scope — exposes which internal roles hold which internal functions, so any portal contact is Forbidden outright.</summary>
     [HttpGet]
     public async Task<ActionResult<IEnumerable<RoleResponse>>> List(CancellationToken ct)
     {
+        if (_tenantContext.SubcontractorId is not null || _tenantContext.ClientId is not null) return Forbid();
+
         var roles = await _db.Roles.OrderBy(r => r.Name).ToListAsync(ct);
         var functionsByRole = await GetFunctionsByRoleAsync(roles.Select(r => r.Id), ct);
 
@@ -70,6 +73,8 @@ public class RolesController : ControllerBase
     [HttpGet("{id:guid}")]
     public async Task<ActionResult<RoleResponse>> Get(Guid id, CancellationToken ct)
     {
+        if (_tenantContext.SubcontractorId is not null || _tenantContext.ClientId is not null) return Forbid();
+
         var role = await _db.Roles.FirstOrDefaultAsync(r => r.Id == id, ct);
         if (role is null) return NotFound();
 

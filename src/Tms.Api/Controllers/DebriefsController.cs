@@ -38,10 +38,19 @@ public class DebriefsController : ControllerBase
         _debriefApproval = debriefApproval;
     }
 
-    /// <summary>Lists debriefs, optionally filtered by status — PendingReview is the Debrief Clerk's working queue.</summary>
+    /// <summary>
+    /// Lists debriefs, optionally filtered by status — PendingReview is the Debrief
+    /// Clerk's working queue. Never part of either portal's documented scope — a
+    /// portal contact's own debrief access is already correctly scoped-to-their-own-leg
+    /// on LegsController.GetDebrief/SubmitDebrief; this unscoped-by-party route would
+    /// otherwise leak every debrief in the company (POD, incidents, expense claims) to
+    /// any portal contact, so it's Forbidden outright for either type.
+    /// </summary>
     [HttpGet]
     public async Task<ActionResult<IEnumerable<DebriefResponse>>> List(DebriefStatus? status, CancellationToken ct)
     {
+        if (_tenantContext.SubcontractorId is not null || _tenantContext.ClientId is not null) return Forbid();
+
         var query = _db.Set<Debrief>().Include(d => d.Incidents).Include(d => d.Expenses).AsQueryable();
         if (status is DebriefStatus s) query = query.Where(d => d.Status == s);
 
@@ -52,6 +61,8 @@ public class DebriefsController : ControllerBase
     [HttpGet("{id:guid}")]
     public async Task<ActionResult<DebriefResponse>> Get(Guid id, CancellationToken ct)
     {
+        if (_tenantContext.SubcontractorId is not null || _tenantContext.ClientId is not null) return Forbid();
+
         var debrief = await _db.Set<Debrief>()
             .Include(d => d.Incidents)
             .Include(d => d.Expenses)

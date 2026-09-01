@@ -43,16 +43,23 @@ public class ApiClientsController : ControllerBase
         _tenantContext = tenantContext;
     }
 
+    /// <summary>Never part of either portal's documented scope — exposes system-to-system ClientId values (the OAuth2 client-credentials username), so any portal contact is Forbidden outright.</summary>
     [HttpGet]
     public async Task<ActionResult<IEnumerable<ApiClientResponse>>> List(CancellationToken ct)
-        => Ok(await _db.ApiClients
+    {
+        if (_tenantContext.SubcontractorId is not null || _tenantContext.ClientId is not null) return Forbid();
+
+        return Ok(await _db.ApiClients
             .OrderBy(c => c.Name)
             .Select(c => new ApiClientResponse(c.Id, c.Name, c.ClientId, c.Status, c.RateLimitPerMinute, c.CreatedAt))
             .ToListAsync(ct));
+    }
 
     [HttpGet("{id:guid}")]
     public async Task<ActionResult<ApiClientResponse>> Get(Guid id, CancellationToken ct)
     {
+        if (_tenantContext.SubcontractorId is not null || _tenantContext.ClientId is not null) return Forbid();
+
         var client = await _db.ApiClients.FirstOrDefaultAsync(c => c.Id == id, ct);
         return client is null
             ? NotFound()
