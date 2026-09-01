@@ -65,35 +65,63 @@ public class LegsController : ControllerBase
     private readonly ITenantContext _tenantContext;
     private readonly DebriefApprovalService _debriefApproval;
     private readonly ExceptionService _exceptions;
+    private readonly IAuthorizationService _authorizationService;
 
     public LegsController(
-        TmsDbContext db, ITenantContext tenantContext, DebriefApprovalService debriefApproval, ExceptionService exceptions)
+        TmsDbContext db, ITenantContext tenantContext, DebriefApprovalService debriefApproval,
+        ExceptionService exceptions, IAuthorizationService authorizationService)
     {
         _db = db;
         _tenantContext = tenantContext;
         _debriefApproval = debriefApproval;
         _exceptions = exceptions;
+        _authorizationService = authorizationService;
     }
 
-    /// <summary>Retrieves a leg's Load Confirmation (§8.2) — PdfUrl is null for now, since there's no PDF-rendering infrastructure in this codebase yet.</summary>
+    /// <summary>
+    /// The row-level scoping and function check every Supplier Portal action needs
+    /// (§13.1) — internal staff (SubcontractorId null on the caller's context) are
+    /// entirely unaffected, preserving this endpoint's existing behavior for them.
+    /// A portal contact must both own the leg's subcontractor and hold the specific
+    /// portal.* function for the action they're attempting.
+    /// </summary>
+    private async Task<ActionResult?> CheckPortalAccessAsync(Guid? legSubcontractorId, string requiredFunction)
+    {
+        if (_tenantContext.SubcontractorId is null) return null;
+        if (legSubcontractorId != _tenantContext.SubcontractorId) return Forbid();
+
+        var authResult = await _authorizationService.AuthorizeAsync(User, requiredFunction);
+        return authResult.Succeeded ? null : Forbid();
+    }
+
+    /// <summary>Retrieves a leg's Load Confirmation (§8.2) — PdfUrl is null for now, since there's no PDF-rendering infrastructure in this codebase yet. Row-level scoped for a Supplier Portal caller (§13.1), same as every other portal action.</summary>
     [HttpGet("{id:guid}/confirmation")]
     public async Task<ActionResult<LoadConfirmationResponse>> GetConfirmation(Guid id, CancellationToken ct)
     {
         var confirmation = await _db.LoadConfirmations.FirstOrDefaultAsync(lc => lc.LoadLegId == id, ct);
-        return confirmation is null ? NotFound() : Ok(ToResponse(confirmation));
+        if (confirmation is null) return NotFound();
+
+        var portalCheck = await CheckPortalAccessAsync(confirmation.SubcontractorId, "portal.subcontractor.viewlegs");
+        if (portalCheck is not null) return portalCheck;
+
+        return Ok(ToResponse(confirmation));
     }
 
     /// <summary>
-    /// Records the subcontractor's response to an Issued confirmation (§8.2) — stands
-    /// in for the Supplier Portal, which doesn't exist yet: an internal user captures
-    /// what the carrier communicated (call, email), rather than the carrier submitting
-    /// it themselves.
+    /// Records the subcontractor's response to an Issued confirmation (§8.2) — either
+    /// the Supplier Portal's own portal.subcontractor.acknowledgeconfirmation action
+    /// (§13.3), or an internal user standing in for a carrier who called or emailed
+    /// instead.
     /// </summary>
     [HttpPost("{id:guid}/confirmation/acknowledge")]
     public async Task<IActionResult> AcknowledgeConfirmation(Guid id, AcknowledgeConfirmationRequest request, CancellationToken ct)
     {
         var confirmation = await _db.LoadConfirmations.FirstOrDefaultAsync(lc => lc.LoadLegId == id, ct);
         if (confirmation is null) return NotFound($"No load confirmation exists for leg {id}.");
+
+        var portalCheck = await CheckPortalAccessAsync(confirmation.SubcontractorId, "portal.subcontractor.acknowledgeconfirmation");
+        if (portalCheck is not null) return portalCheck;
+
         if (confirmation.Status != LoadConfirmationStatus.Issued)
             return Conflict($"Confirmation is {confirmation.Status}; only an Issued confirmation can be acknowledged or declined.");
 
@@ -104,6 +132,7 @@ public class LegsController : ControllerBase
         return NoContent();
     }
 
+    /// <summary>Row-level scoped for a Supplier Portal caller (§13.1), same as every other portal action — a debrief carries no SubcontractorId of its own, so this resolves it from the leg.</summary>
     [HttpGet("{id:guid}/debrief")]
     public async Task<ActionResult<DebriefResponse>> GetDebrief(Guid id, CancellationToken ct)
     {
@@ -111,18 +140,31 @@ public class LegsController : ControllerBase
             .Include(d => d.Incidents)
             .Include(d => d.Expenses)
             .FirstOrDefaultAsync(d => d.LoadLegId == id, ct);
-        return debrief is null ? NotFound() : Ok(ToResponse(debrief));
+        if (debrief is null) return NotFound();
+
+        if (_tenantContext.SubcontractorId is not null)
+        {
+            var legSubcontractorId = await _db.LoadLegs.Where(l => l.Id == id).Select(l => l.SubcontractorId).FirstOrDefaultAsync(ct);
+            var portalCheck = await CheckPortalAccessAsync(legSubcontractorId, "portal.subcontractor.viewlegs");
+            if (portalCheck is not null) return portalCheck;
+        }
+
+        return Ok(ToResponse(debrief));
     }
 
     /// <summary>
-    /// Submits a leg's debrief (§09, Fig. 5) — also used by driver mobile web, or by an
-    /// internal user standing in for a subcontracted leg's carrier (the Supplier Portal,
-    /// §13.3, doesn't exist yet). Everything is captured in one atomic call — odometer,
-    /// fuel, POD, incidents, and expense lines — rather than a partial submission
-    /// followed by separate calls to attach each one; a debrief with no exceptions
-    /// auto-approves immediately, so there'd be no window left to add anything
-    /// afterward otherwise. Auto-approves if nothing about it is exceptional; otherwise
-    /// sits PendingReview for a Debrief Clerk (DebriefsController.Approve) to resolve.
+    /// Submits a leg's debrief (§09, Fig. 5) — also used by driver mobile web, by the
+    /// Supplier Portal's own portal.subcontractor.uploadpod action for a subcontracted
+    /// leg (§13.3 — the doc names it narrower than what this endpoint actually covers,
+    /// since no separate "just POD" endpoint exists; a carrier's detention claims etc.
+    /// go through the same Expenses list as everything else described in §09/§9.1), or
+    /// by an internal user standing in for a carrier who called or emailed instead.
+    /// Everything is captured in one atomic call — odometer, fuel, POD, incidents, and
+    /// expense lines — rather than a partial submission followed by separate calls to
+    /// attach each one; a debrief with no exceptions auto-approves immediately, so
+    /// there'd be no window left to add anything afterward otherwise. Auto-approves if
+    /// nothing about it is exceptional; otherwise sits PendingReview for a Debrief
+    /// Clerk (DebriefsController.Approve) to resolve.
     /// </summary>
     [HttpPost("{id:guid}/debrief")]
     public async Task<ActionResult<DebriefResponse>> SubmitDebrief(Guid id, SubmitDebriefRequest request, CancellationToken ct)
@@ -132,6 +174,10 @@ public class LegsController : ControllerBase
 
         var leg = await _db.LoadLegs.FirstOrDefaultAsync(l => l.Id == id, ct);
         if (leg is null) return NotFound();
+
+        var portalCheck = await CheckPortalAccessAsync(leg.SubcontractorId, "portal.subcontractor.uploadpod");
+        if (portalCheck is not null) return portalCheck;
+
         if (leg.Status != LoadLegStatus.Delivered)
             return Conflict($"Leg is {leg.Status}; only a Delivered leg can be debriefed.");
         if (await _db.Set<Debrief>().AnyAsync(d => d.LoadLegId == id, ct))
@@ -267,7 +313,7 @@ public class LegsController : ControllerBase
         return CreatedAtAction(nameof(GetDebrief), new { id }, ToResponse(debrief));
     }
 
-    private static LoadConfirmationResponse ToResponse(LoadConfirmation confirmation) => new(
+    internal static LoadConfirmationResponse ToResponse(LoadConfirmation confirmation) => new(
         confirmation.Id, confirmation.LoadLegId, confirmation.SubcontractorId, confirmation.DocumentNumber,
         confirmation.IssuedDate, confirmation.Status, confirmation.PdfUrl, confirmation.DeclineReason);
 

@@ -35,6 +35,14 @@ public class TenantContextMiddleware
 
             tenantContext.ApiClientId = user.FindFirstValue("client_id");
             tenantContext.IsPlatformSupport = user.IsInRole("PlatformSupport");
+
+            // Distinct claim name from "client_id" above (§13.1) — that one identifies
+            // an ApiClient (system-to-system auth), this one a Supplier Portal
+            // contact's own Subcontractor. Different concepts that happen to share the
+            // word "client" in this domain — a Client (customer) vs. an ApiClient
+            // (integration credential) vs. a Subcontractor (carrier) portal contact.
+            if (Guid.TryParse(user.FindFirstValue("subcontractor_id"), out var subcontractorId))
+                tenantContext.SubcontractorId = subcontractorId;
         }
 
         await _next(context);

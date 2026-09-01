@@ -43,18 +43,32 @@ public class SupplierInvoicesController : ControllerBase
     private readonly TmsDbContext _db;
     private readonly ITenantContext _tenantContext;
     private readonly ExceptionService _exceptions;
+    private readonly IAuthorizationService _authorizationService;
 
-    public SupplierInvoicesController(TmsDbContext db, ITenantContext tenantContext, ExceptionService exceptions)
+    public SupplierInvoicesController(
+        TmsDbContext db, ITenantContext tenantContext, ExceptionService exceptions, IAuthorizationService authorizationService)
     {
         _db = db;
         _tenantContext = tenantContext;
         _exceptions = exceptions;
+        _authorizationService = authorizationService;
     }
 
+    /// <summary>Also the Supplier Portal's own "when will I get paid" view (§13.1, §13.3) — a portal caller is pinned to their own Subcontractor's invoices regardless of what subcontractorId they pass.</summary>
     [HttpGet]
-    public async Task<ActionResult<IEnumerable<SupplierInvoiceResponse>>> List(CancellationToken ct)
+    public async Task<ActionResult<IEnumerable<SupplierInvoiceResponse>>> List(Guid? subcontractorId, CancellationToken ct)
     {
-        var invoices = await _db.SupplierInvoices.Include(si => si.Expenses).OrderByDescending(si => si.ReceivedDate).ToListAsync(ct);
+        if (_tenantContext.SubcontractorId is Guid ownSubcontractorId)
+        {
+            var authResult = await _authorizationService.AuthorizeAsync(User, "portal.subcontractor.viewlegs");
+            if (!authResult.Succeeded) return Forbid();
+            subcontractorId = ownSubcontractorId;
+        }
+
+        var query = _db.SupplierInvoices.Include(si => si.Expenses).AsQueryable();
+        if (subcontractorId is Guid s) query = query.Where(si => si.SubcontractorId == s);
+
+        var invoices = await query.OrderByDescending(si => si.ReceivedDate).ToListAsync(ct);
         return Ok(invoices.Select(ToResponse));
     }
 
@@ -62,6 +76,7 @@ public class SupplierInvoicesController : ControllerBase
     public async Task<ActionResult<SupplierInvoiceResponse>> Get(Guid id, CancellationToken ct)
     {
         var invoice = await _db.SupplierInvoices.Include(si => si.Expenses).FirstOrDefaultAsync(si => si.Id == id, ct);
+        if (invoice is not null && !_tenantContext.CanAccessSubcontractor(invoice.SubcontractorId)) return Forbid();
         return invoice is null ? NotFound() : Ok(ToResponse(invoice));
     }
 

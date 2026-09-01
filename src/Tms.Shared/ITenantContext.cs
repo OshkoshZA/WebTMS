@@ -18,4 +18,12 @@ public interface ITenantContext
     /// audit trail (§12).
     /// </summary>
     bool IsPlatformSupport { get; }
+
+    /// <summary>
+    /// Set only when the caller is a Supplier Portal contact (§13.1) — the row-level
+    /// scoping claim Fig. 10 describes, restricting them to their own Subcontractor's
+    /// legs, confirmations, and accruals. Null for every other kind of caller
+    /// (internal staff, an ApiClient), the same way IsPlatformSupport is false for them.
+    /// </summary>
+    Guid? SubcontractorId { get; }
 }

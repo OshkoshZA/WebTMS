@@ -17,4 +17,5 @@ public class HttpTenantContext : ITenantContext, ICurrentUserAccessor
     public bool IsPlatformSupport { get; set; }
     public Guid? UserId { get; set; }
     public string? ApiClientId { get; set; }
+    public Guid? SubcontractorId { get; set; }
 }

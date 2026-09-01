@@ -4,6 +4,7 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Tms.Infrastructure;
 using Tms.Modules.Loads;
+using Tms.Modules.Rating;
 using Tms.Shared;
 
 namespace Tms.Api.Controllers;
@@ -15,6 +16,10 @@ public record UpdateSubcontractorRequest(
     string Name, string RegistrationNo, DateOnly? InsuranceExpiry, string? BankingDetails, int PaymentTermsDays);
 
 public record AddSubcontractorCurrencyRequest(Guid CurrencyId);
+
+public record SubcontractorLegResponse(
+    Guid Id, Guid LoadId, int SequenceNo, Guid OriginLocationId, Guid DestinationLocationId,
+    LoadLegStatus Status, decimal BuyAmount, Guid? BuyCurrencyId, LoadConfirmationResponse? Confirmation);
 
 /// <summary>
 /// Subcontractor (third-party carrier) master data (docs/architecture.html §5.1, §10.2).
@@ -118,6 +123,44 @@ public class SubcontractorsController : ControllerBase
         subcontractor.Status = SubcontractorStatus.Active;
         await _db.SaveChangesAsync(ct);
         return NoContent();
+    }
+
+    /// <summary>
+    /// Legs allocated to this subcontractor, with each one's Load Confirmation and
+    /// agreed buy rate (§8.2, §13.3) — the Supplier Portal's own "my work" view,
+    /// row-level scoped exactly like every other portal action (§13.1) rather than a
+    /// separate endpoint just for the portal, per this section's "same REST API" design.
+    /// </summary>
+    [HttpGet("{id:guid}/legs")]
+    public async Task<ActionResult<IEnumerable<SubcontractorLegResponse>>> Legs(Guid id, CancellationToken ct)
+    {
+        if (!_tenantContext.CanAccessSubcontractor(id)) return Forbid();
+        if (!await _db.Subcontractors.AnyAsync(s => s.Id == id, ct)) return NotFound();
+
+        var legs = await _db.LoadLegs.Where(l => l.SubcontractorId == id).OrderByDescending(l => l.Id).ToListAsync(ct);
+        var legIds = legs.Select(l => l.Id).ToList();
+
+        var buyByLeg = await _db.Set<RateLine>()
+            .Where(r => r.Direction == RateLineDirection.Buy && r.SourceType == RateLineSourceType.CommodityLine)
+            .Join(_db.CommodityLines, r => r.SourceId, cl => cl.Id, (r, cl) => new { r, cl.LoadLegId })
+            .Where(x => legIds.Contains(x.LoadLegId))
+            .GroupBy(x => x.LoadLegId)
+            .Select(g => new { LoadLegId = g.Key, Amount = g.Sum(x => x.r.Amount), CurrencyId = g.Select(x => x.r.CurrencyId).FirstOrDefault() })
+            .ToListAsync(ct);
+        var buyByLegLookup = buyByLeg.ToDictionary(x => x.LoadLegId);
+
+        var confirmations = await _db.Set<LoadConfirmation>().Where(lc => legIds.Contains(lc.LoadLegId)).ToListAsync(ct);
+        var confirmationByLeg = confirmations.ToDictionary(lc => lc.LoadLegId);
+
+        return Ok(legs.Select(leg =>
+        {
+            buyByLegLookup.TryGetValue(leg.Id, out var buy);
+            confirmationByLeg.TryGetValue(leg.Id, out var confirmation);
+            return new SubcontractorLegResponse(
+                leg.Id, leg.LoadId, leg.SequenceNo, leg.OriginLocationId, leg.DestinationLocationId,
+                leg.Status, buy?.Amount ?? 0m, buy?.CurrencyId,
+                confirmation is null ? null : LegsController.ToResponse(confirmation));
+        }));
     }
 
     /// <summary>Currencies this subcontractor is permitted to be paid in, beyond its primary — its own CurrencyId is always implicitly allowed and isn't listed here (docs/architecture.html §4.3).</summary>

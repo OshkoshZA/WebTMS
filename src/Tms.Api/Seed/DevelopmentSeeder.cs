@@ -269,7 +269,15 @@ public static class DevelopmentSeeder
             ("expensetype.master.manage",
              "Create, update, deactivate, and reactivate ExpenseType master data (§9.1)."),
             ("exception.manage",
-             "Acknowledge and resolve an Exception raised by any module against the shared §16.1 mechanism.")
+             "Acknowledge and resolve an Exception raised by any module against the shared §16.1 mechanism."),
+            ("subcontractor.contact.manage",
+             "Create, deactivate, and reactivate a Subcontractor's Supplier Portal contacts (§13.1) — distinct from subcontractor.master.manage, since granting a carrier's staff a portal login is a different kind of sensitive than editing the subcontractor's own master data."),
+            ("portal.subcontractor.viewlegs",
+             "A Supplier Portal contact's own view of their Subcontractor's allocated legs, load confirmations, and accrual/supplier-invoice status (§13.3) — never granted to internal staff, whose equivalent access needs no separate function."),
+            ("portal.subcontractor.acknowledgeconfirmation",
+             "A Supplier Portal contact accepting or declining their own Subcontractor's Load Confirmation (§8.2, §13.3)."),
+            ("portal.subcontractor.uploadpod",
+             "A Supplier Portal contact submitting their own Subcontractor's leg debrief — POD and any additional claims (§09, §13.3).")
         };
 
         var adminRole = await roleManager.FindByNameAsync(AdminRoleName);
