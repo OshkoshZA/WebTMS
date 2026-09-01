@@ -43,20 +43,25 @@ public class ClientsController : ControllerBase
 
     /// <summary>
     /// The row-level scoping and function check every Customer Portal action needs
-    /// (§13.1) — mirrors LoadsController's own CheckPortalClientAccessAsync.
+    /// (§13.1) — mirrors LoadsController's own CheckPortalClientAccessAsync, including
+    /// its fix: a Supplier Portal contact (ClientId null, same as staff) is correctly
+    /// Forbidden via CanAccessClient rather than silently falling through unrestricted.
     /// </summary>
     private async Task<ActionResult?> CheckPortalClientAccessAsync(Guid clientId, string requiredFunction)
     {
-        if (_tenantContext.ClientId is null) return null;
-        if (clientId != _tenantContext.ClientId) return Forbid();
+        if (_tenantContext.ClientId is null && _tenantContext.SubcontractorId is null) return null;
+        if (!_tenantContext.CanAccessClient(clientId)) return Forbid();
 
         var authResult = await _authorizationService.AuthorizeAsync(User, requiredFunction);
         return authResult.Succeeded ? null : Forbid();
     }
 
+    /// <summary>Client master-data browsing — never part of either portal's documented scope (§13.1/§13.2 only ever name credit-status/invoices/credit-notes/loads for a Customer Portal contact, not general master-data access), so any portal caller of either type is Forbidden outright rather than left reachable.</summary>
     [HttpGet]
     public async Task<ActionResult<IEnumerable<Client>>> List(CancellationToken ct)
     {
+        if (_tenantContext.ClientId is not null || _tenantContext.SubcontractorId is not null) return Forbid();
+
         // No explicit tenant/company filtering here — TmsDbContext's global query
         // filters (§4.1) already scope this to the caller's own data.
         return Ok(await _db.Clients.OrderBy(c => c.Name).ToListAsync(ct));
@@ -65,6 +70,8 @@ public class ClientsController : ControllerBase
     [HttpGet("{id:guid}")]
     public async Task<ActionResult<Client>> Get(Guid id, CancellationToken ct)
     {
+        if (_tenantContext.ClientId is not null || _tenantContext.SubcontractorId is not null) return Forbid();
+
         var client = await _db.Clients.FirstOrDefaultAsync(c => c.Id == id, ct);
         return client is null ? NotFound() : Ok(client);
     }
@@ -132,6 +139,7 @@ public class ClientsController : ControllerBase
     [HttpGet("{id:guid}/currencies")]
     public async Task<ActionResult<IEnumerable<ClientCurrency>>> Currencies(Guid id, CancellationToken ct)
     {
+        if (_tenantContext.ClientId is not null || _tenantContext.SubcontractorId is not null) return Forbid();
         if (!await _db.Clients.AnyAsync(c => c.Id == id, ct)) return NotFound();
 
         return Ok(await _db.Set<ClientCurrency>().Where(cc => cc.ClientId == id).ToListAsync(ct));

@@ -42,13 +42,20 @@ public class SubcontractorsController : ControllerBase
         _tenantContext = tenantContext;
     }
 
+    /// <summary>Subcontractor master-data browsing, including BankingDetails on Get — never part of either portal's documented scope (§13.3 only ever names legs/confirmations/accrual status for a Supplier Portal contact, not general master-data access), so any portal caller of either type is Forbidden outright rather than left reachable.</summary>
     [HttpGet]
     public async Task<ActionResult<IEnumerable<Subcontractor>>> List(CancellationToken ct)
-        => Ok(await _db.Subcontractors.OrderBy(s => s.Name).ToListAsync(ct));
+    {
+        if (_tenantContext.SubcontractorId is not null || _tenantContext.ClientId is not null) return Forbid();
+
+        return Ok(await _db.Subcontractors.OrderBy(s => s.Name).ToListAsync(ct));
+    }
 
     [HttpGet("{id:guid}")]
     public async Task<ActionResult<Subcontractor>> Get(Guid id, CancellationToken ct)
     {
+        if (_tenantContext.SubcontractorId is not null || _tenantContext.ClientId is not null) return Forbid();
+
         var subcontractor = await _db.Subcontractors.FirstOrDefaultAsync(s => s.Id == id, ct);
         return subcontractor is null ? NotFound() : Ok(subcontractor);
     }
@@ -167,6 +174,7 @@ public class SubcontractorsController : ControllerBase
     [HttpGet("{id:guid}/currencies")]
     public async Task<ActionResult<IEnumerable<SubcontractorCurrency>>> Currencies(Guid id, CancellationToken ct)
     {
+        if (_tenantContext.SubcontractorId is not null || _tenantContext.ClientId is not null) return Forbid();
         if (!await _db.Subcontractors.AnyAsync(s => s.Id == id, ct)) return NotFound();
 
         return Ok(await _db.Set<SubcontractorCurrency>().Where(sc => sc.SubcontractorId == id).ToListAsync(ct));

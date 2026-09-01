@@ -61,12 +61,27 @@ public class SubcontractorContactsController : ControllerBase
     {
         if (_tenantContext.TenantId is null)
             return Unauthorized("Request is missing a resolved Tenant context.");
+        if (!_tenantContext.CanAccessSubcontractor(subcontractorId)) return Forbid();
 
         var subcontractor = await _db.Subcontractors.FirstOrDefaultAsync(s => s.Id == subcontractorId, ct);
         if (subcontractor is null) return NotFound($"Subcontractor {subcontractorId} was not found.");
 
-        if (!await _db.Roles.AnyAsync(r => r.Id == request.RoleId, ct))
+        var roleFunctionCodes = await _db.RoleFunctions
+            .Where(rf => rf.RoleId == request.RoleId)
+            .Join(_db.Functions, rf => rf.FunctionId, f => f.Id, (rf, f) => f.Code)
+            .ToListAsync(ct);
+        if (roleFunctionCodes.Count == 0 && !await _db.Roles.AnyAsync(r => r.Id == request.RoleId, ct))
             return NotFound($"Role {request.RoleId} was not found.");
+
+        // A Supplier Portal contact must only ever be handed a Role restricted to
+        // portal.subcontractor.* — the doc's own trust boundary (§13.1: a portal
+        // contact's Role "should be granted... only portal.*"), previously unenforced.
+        // Handing an external contact a Role that also carries any internal function
+        // (identity.user.manage, finance.invoice.manage, etc.) would give them a fully
+        // working internal-staff session for this Company, JWT scoping claim
+        // notwithstanding — most endpoints check the function claim alone.
+        if (roleFunctionCodes.Any(code => !code.StartsWith("portal.subcontractor.", StringComparison.Ordinal)))
+            return BadRequest("A Supplier Portal contact's Role may only grant portal.subcontractor.* functions.");
 
         var user = new ApplicationUser
         {
@@ -110,6 +125,8 @@ public class SubcontractorContactsController : ControllerBase
     [Authorize(Policy = "subcontractor.contact.manage")]
     public async Task<IActionResult> Deactivate(Guid subcontractorId, Guid id, CancellationToken ct)
     {
+        if (!_tenantContext.CanAccessSubcontractor(subcontractorId)) return Forbid();
+
         var contact = await _db.Users.FirstOrDefaultAsync(u => u.Id == id && u.SubcontractorId == subcontractorId, ct);
         if (contact is null) return NotFound();
 
@@ -123,6 +140,8 @@ public class SubcontractorContactsController : ControllerBase
     [Authorize(Policy = "subcontractor.contact.manage")]
     public async Task<IActionResult> Reactivate(Guid subcontractorId, Guid id, CancellationToken ct)
     {
+        if (!_tenantContext.CanAccessSubcontractor(subcontractorId)) return Forbid();
+
         var contact = await _db.Users.FirstOrDefaultAsync(u => u.Id == id && u.SubcontractorId == subcontractorId, ct);
         if (contact is null) return NotFound();
 

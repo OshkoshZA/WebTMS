@@ -80,15 +80,19 @@ public class LegsController : ControllerBase
 
     /// <summary>
     /// The row-level scoping and function check every Supplier Portal action needs
-    /// (§13.1) — internal staff (SubcontractorId null on the caller's context) are
-    /// entirely unaffected, preserving this endpoint's existing behavior for them.
-    /// A portal contact must both own the leg's subcontractor and hold the specific
-    /// portal.* function for the action they're attempting.
+    /// (§13.1) — internal staff (neither SubcontractorId nor ClientId set) are entirely
+    /// unaffected, preserving this endpoint's existing behavior for them. A portal
+    /// contact must both own the leg's subcontractor (delegating to
+    /// ITenantContext.CanAccessSubcontractor, which — unlike an earlier, buggy version
+    /// of this method — correctly Forbids a Customer Portal contact too, not just a
+    /// Supplier Portal contact for a different Subcontractor) and hold the specific
+    /// portal.* function for the action they're attempting. A null legSubcontractorId
+    /// (an OwnFleet leg) is never accessible to any portal caller.
     /// </summary>
     private async Task<ActionResult?> CheckPortalAccessAsync(Guid? legSubcontractorId, string requiredFunction)
     {
-        if (_tenantContext.SubcontractorId is null) return null;
-        if (legSubcontractorId != _tenantContext.SubcontractorId) return Forbid();
+        if (_tenantContext.SubcontractorId is null && _tenantContext.ClientId is null) return null;
+        if (legSubcontractorId is null || !_tenantContext.CanAccessSubcontractor(legSubcontractorId.Value)) return Forbid();
 
         var authResult = await _authorizationService.AuthorizeAsync(User, requiredFunction);
         return authResult.Succeeded ? null : Forbid();

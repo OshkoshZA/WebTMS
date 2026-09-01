@@ -58,6 +58,10 @@ public class SupplierInvoicesController : ControllerBase
     [HttpGet]
     public async Task<ActionResult<IEnumerable<SupplierInvoiceResponse>>> List(Guid? subcontractorId, CancellationToken ct)
     {
+        // A Customer Portal contact (SubcontractorId null, same as staff) is explicitly
+        // Forbidden — the bug an earlier version of this check had would have returned
+        // every subcontractor's supplier invoices to a client contact.
+        if (_tenantContext.ClientId is not null) return Forbid();
         if (_tenantContext.SubcontractorId is Guid ownSubcontractorId)
         {
             var authResult = await _authorizationService.AuthorizeAsync(User, "portal.subcontractor.viewlegs");

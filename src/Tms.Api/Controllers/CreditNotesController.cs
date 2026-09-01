@@ -56,6 +56,10 @@ public class CreditNotesController : ControllerBase
     [HttpGet]
     public async Task<ActionResult<IEnumerable<CreditNoteResponse>>> List(Guid? clientId, CancellationToken ct)
     {
+        // A Supplier Portal contact (ClientId null, same as staff) is explicitly
+        // Forbidden — the bug an earlier version of this check had would have returned
+        // every client's credit notes to a subcontractor contact.
+        if (_tenantContext.SubcontractorId is not null) return Forbid();
         if (_tenantContext.ClientId is Guid ownClientId)
         {
             var authResult = await _authorizationService.AuthorizeAsync(User, "portal.client.viewinvoices");

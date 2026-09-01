@@ -40,7 +40,12 @@ public class AccrualsController : ControllerBase
     {
         // A portal caller (§13.1) is pinned to their own Subcontractor regardless of
         // what subcontractorId they pass — never silently widened, and gated behind
-        // the specific portal function the way every other portal action is.
+        // the specific portal function the way every other portal action is. A Customer
+        // Portal contact (SubcontractorId null, same as staff) is explicitly Forbidden
+        // rather than silently falling through to the unfiltered staff branch below —
+        // the bug an earlier version of this check had, which would have returned
+        // every subcontractor's accruals to a client contact.
+        if (_tenantContext.ClientId is not null) return Forbid();
         if (_tenantContext.SubcontractorId is Guid ownSubcontractorId)
         {
             var authResult = await _authorizationService.AuthorizeAsync(User, "portal.subcontractor.viewlegs");

@@ -89,23 +89,42 @@ public class LoadsController : ControllerBase
 
     /// <summary>
     /// The row-level scoping and function check every Customer Portal action needs
-    /// (§13.1) — internal staff (ClientId null on the caller's context) are entirely
-    /// unaffected. A portal contact must both own the load's client and hold the
-    /// specific portal.client.* function for the action they're attempting.
+    /// (§13.1) — internal staff (neither ClientId nor SubcontractorId set) are entirely
+    /// unaffected. A portal contact must both own the load's client (delegating to
+    /// ITenantContext.CanAccessClient, which — unlike an earlier, buggy version of this
+    /// method — correctly Forbids a Supplier Portal contact too, not just a Customer
+    /// Portal contact for a different Client) and hold the specific portal.client.*
+    /// function for the action they're attempting.
     /// </summary>
     private async Task<ActionResult?> CheckPortalClientAccessAsync(Guid loadClientId, string requiredFunction)
     {
-        if (_tenantContext.ClientId is null) return null;
-        if (loadClientId != _tenantContext.ClientId) return Forbid();
+        if (_tenantContext.ClientId is null && _tenantContext.SubcontractorId is null) return null;
+        if (!_tenantContext.CanAccessClient(loadClientId)) return Forbid();
 
         var authResult = await _authorizationService.AuthorizeAsync(User, requiredFunction);
         return authResult.Succeeded ? null : Forbid();
     }
 
-    /// <summary>Also the Customer Portal's own load list (§13.2) — a portal caller sees only their own Client's loads regardless of what the rest of this query would otherwise return.</summary>
+    /// <summary>
+    /// AddLeg/AllocateLeg/StartLeg/DeliverLeg/Hold/ReleaseHold/Cancel/AddCommodityLine
+    /// carry no function policy at all — before Portal contacts existed, the class-level
+    /// [Authorize] (any authenticated internal staff) was an adequate gate on its own.
+    /// Now that an authenticated caller can also be an external Subcontractor/Client
+    /// portal contact, and none of these actions are part of the documented portal
+    /// feature (§13.2's own scope is limited to booking a load's header via Create; §13.3
+    /// names only leg confirmation/debrief actions, both on LegsController), every one of
+    /// them explicitly Forbids any portal caller outright rather than leaving them
+    /// reachable by whatever narrow portal.* functions a contact happens to hold.
+    /// </summary>
+    private ActionResult? BlockPortalCallers() =>
+        _tenantContext.ClientId is not null || _tenantContext.SubcontractorId is not null ? Forbid() : null;
+
+    /// <summary>Also the Customer Portal's own load list (§13.2) — a portal caller sees only their own Client's loads regardless of what the rest of this query would otherwise return. A Supplier Portal contact (ClientId null, same as staff) is explicitly Forbidden rather than silently falling through to the unfiltered staff branch — the bug an earlier version of this check had.</summary>
     [HttpGet]
     public async Task<ActionResult<IEnumerable<Load>>> List(CancellationToken ct)
     {
+        if (_tenantContext.SubcontractorId is not null) return Forbid();
+
         var query = _db.Loads.AsQueryable();
         if (_tenantContext.ClientId is Guid ownClientId)
         {
@@ -201,6 +220,8 @@ public class LoadsController : ControllerBase
     [HttpPost("{id:guid}/legs")]
     public async Task<ActionResult<LoadLeg>> AddLeg(Guid id, AddLoadLegRequest request, CancellationToken ct)
     {
+        if (BlockPortalCallers() is ActionResult portalBlock) return portalBlock;
+
         if (_tenantContext.TenantId is null || _tenantContext.CompanyId is null)
             return Unauthorized("Request is missing a resolved Tenant/Company context.");
 
@@ -284,6 +305,8 @@ public class LoadsController : ControllerBase
     [HttpPost("{id:guid}/legs/{legId:guid}/allocate")]
     public async Task<IActionResult> AllocateLeg(Guid id, Guid legId, AllocateLoadLegRequest request, CancellationToken ct)
     {
+        if (BlockPortalCallers() is ActionResult portalBlock) return portalBlock;
+
         // Acquired before the very first read of this leg's row (§5.2, §8.2, §10.2):
         // two concurrent Allocate calls for the same Planned leg could otherwise both
         // pass every check below before either commits — a duplicate LoadConfirmation
@@ -368,6 +391,8 @@ public class LoadsController : ControllerBase
     [HttpPost("{id:guid}/legs/{legId:guid}/start")]
     public async Task<IActionResult> StartLeg(Guid id, Guid legId, CancellationToken ct)
     {
+        if (BlockPortalCallers() is ActionResult portalBlock) return portalBlock;
+
         var load = await _db.Loads.Include(l => l.Legs).FirstOrDefaultAsync(l => l.Id == id, ct);
         if (load is null) return NotFound();
 
@@ -389,6 +414,8 @@ public class LoadsController : ControllerBase
     [HttpPost("{id:guid}/legs/{legId:guid}/deliver")]
     public async Task<IActionResult> DeliverLeg(Guid id, Guid legId, CancellationToken ct)
     {
+        if (BlockPortalCallers() is ActionResult portalBlock) return portalBlock;
+
         var load = await _db.Loads.Include(l => l.Legs).FirstOrDefaultAsync(l => l.Id == id, ct);
         if (load is null) return NotFound();
 
@@ -408,6 +435,8 @@ public class LoadsController : ControllerBase
     [HttpPost("{id:guid}/hold")]
     public async Task<IActionResult> Hold(Guid id, HoldLoadRequest request, CancellationToken ct)
     {
+        if (BlockPortalCallers() is ActionResult portalBlock) return portalBlock;
+
         var load = await _db.Loads.FirstOrDefaultAsync(l => l.Id == id, ct);
         if (load is null) return NotFound();
         if (load.Status != LoadStatus.InTransit)
@@ -428,6 +457,8 @@ public class LoadsController : ControllerBase
     [HttpPost("{id:guid}/release-hold")]
     public async Task<IActionResult> ReleaseHold(Guid id, CancellationToken ct)
     {
+        if (BlockPortalCallers() is ActionResult portalBlock) return portalBlock;
+
         var load = await _db.Loads.Include(l => l.Legs).FirstOrDefaultAsync(l => l.Id == id, ct);
         if (load is null) return NotFound();
         if (load.Status != LoadStatus.OnHold)
@@ -443,6 +474,8 @@ public class LoadsController : ControllerBase
     [HttpPost("{id:guid}/cancel")]
     public async Task<IActionResult> Cancel(Guid id, CancellationToken ct)
     {
+        if (BlockPortalCallers() is ActionResult portalBlock) return portalBlock;
+
         var load = await _db.Loads.FirstOrDefaultAsync(l => l.Id == id, ct);
         if (load is null) return NotFound();
         if (load.Status != LoadStatus.Booked && load.Status != LoadStatus.Allocated)
@@ -461,6 +494,8 @@ public class LoadsController : ControllerBase
     [HttpPost("{id:guid}/legs/{legId:guid}/commodity-lines")]
     public async Task<ActionResult<CommodityLine>> AddCommodityLine(Guid id, Guid legId, AddCommodityLineRequest request, CancellationToken ct)
     {
+        if (BlockPortalCallers() is ActionResult portalBlock) return portalBlock;
+
         if (_tenantContext.TenantId is null || _tenantContext.CompanyId is null)
             return Unauthorized("Request is missing a resolved Tenant/Company context.");
 

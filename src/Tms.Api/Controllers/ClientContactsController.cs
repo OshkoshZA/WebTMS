@@ -56,12 +56,26 @@ public class ClientContactsController : ControllerBase
     {
         if (_tenantContext.TenantId is null)
             return Unauthorized("Request is missing a resolved Tenant context.");
+        if (!_tenantContext.CanAccessClient(clientId)) return Forbid();
 
         var client = await _db.Clients.FirstOrDefaultAsync(c => c.Id == clientId, ct);
         if (client is null) return NotFound($"Client {clientId} was not found.");
 
-        if (!await _db.Roles.AnyAsync(r => r.Id == request.RoleId, ct))
+        var roleFunctionCodes = await _db.RoleFunctions
+            .Where(rf => rf.RoleId == request.RoleId)
+            .Join(_db.Functions, rf => rf.FunctionId, f => f.Id, (rf, f) => f.Code)
+            .ToListAsync(ct);
+        if (roleFunctionCodes.Count == 0 && !await _db.Roles.AnyAsync(r => r.Id == request.RoleId, ct))
             return NotFound($"Role {request.RoleId} was not found.");
+
+        // A Customer Portal contact must only ever be handed a Role restricted to
+        // portal.client.* — the doc's own trust boundary (§13.1), previously
+        // unenforced. Handing an external contact a Role that also carries any
+        // internal function would give them a fully working internal-staff session
+        // for this Company, JWT scoping claim notwithstanding — most endpoints check
+        // the function claim alone.
+        if (roleFunctionCodes.Any(code => !code.StartsWith("portal.client.", StringComparison.Ordinal)))
+            return BadRequest("A Customer Portal contact's Role may only grant portal.client.* functions.");
 
         var user = new ApplicationUser
         {
@@ -105,6 +119,8 @@ public class ClientContactsController : ControllerBase
     [Authorize(Policy = "client.contact.manage")]
     public async Task<IActionResult> Deactivate(Guid clientId, Guid id, CancellationToken ct)
     {
+        if (!_tenantContext.CanAccessClient(clientId)) return Forbid();
+
         var contact = await _db.Users.FirstOrDefaultAsync(u => u.Id == id && u.ClientId == clientId, ct);
         if (contact is null) return NotFound();
 
@@ -118,6 +134,8 @@ public class ClientContactsController : ControllerBase
     [Authorize(Policy = "client.contact.manage")]
     public async Task<IActionResult> Reactivate(Guid clientId, Guid id, CancellationToken ct)
     {
+        if (!_tenantContext.CanAccessClient(clientId)) return Forbid();
+
         var contact = await _db.Users.FirstOrDefaultAsync(u => u.Id == id && u.ClientId == clientId, ct);
         if (contact is null) return NotFound();
 

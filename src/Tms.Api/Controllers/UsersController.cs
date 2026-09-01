@@ -191,6 +191,43 @@ public class UsersController : ControllerBase
         var role = await _db.Roles.FirstOrDefaultAsync(r => r.Id == request.RoleId, ct);
         if (role is null) return NotFound($"Role {request.RoleId} was not found.");
 
+        // A Portal contact (§13.1) getting a stray company/role assignment here would
+        // let their next login resolve CompanyId to a company their Subcontractor/
+        // Client has nothing to do with, carrying that company's full function set
+        // alongside their still-attached portal scoping claim — the assignment must be
+        // confined to the Company that actually owns their Subcontractor/Client, and
+        // the Role to the matching portal.* functions only, same as contact creation
+        // itself enforces (SubcontractorContactsController/ClientContactsController).
+        if (user.SubcontractorId is Guid ownSubcontractorId)
+        {
+            var subcontractor = await _db.Subcontractors.FirstAsync(s => s.Id == ownSubcontractorId, ct);
+            if (subcontractor.CompanyId != request.CompanyId)
+                return BadRequest("A Supplier Portal contact can only be assigned a role in the Company that owns their Subcontractor.");
+
+            // Materialized before .Any() — StartsWith(string, StringComparison) has no
+            // SQL translation, so this must run as an in-memory check, not part of the
+            // query itself (confirmed live: the query-translated form throws a 500).
+            var functionCodes = await _db.RoleFunctions
+                .Where(rf => rf.RoleId == request.RoleId)
+                .Join(_db.Functions, rf => rf.FunctionId, f => f.Id, (rf, f) => f.Code)
+                .ToListAsync(ct);
+            if (functionCodes.Any(code => !code.StartsWith("portal.subcontractor.", StringComparison.Ordinal)))
+                return BadRequest("A Supplier Portal contact's Role may only grant portal.subcontractor.* functions.");
+        }
+        else if (user.ClientId is Guid ownClientId)
+        {
+            var client = await _db.Clients.FirstAsync(c => c.Id == ownClientId, ct);
+            if (client.CompanyId != request.CompanyId)
+                return BadRequest("A Customer Portal contact can only be assigned a role in the Company that owns their Client.");
+
+            var functionCodes = await _db.RoleFunctions
+                .Where(rf => rf.RoleId == request.RoleId)
+                .Join(_db.Functions, rf => rf.FunctionId, f => f.Id, (rf, f) => f.Code)
+                .ToListAsync(ct);
+            if (functionCodes.Any(code => !code.StartsWith("portal.client.", StringComparison.Ordinal)))
+                return BadRequest("A Customer Portal contact's Role may only grant portal.client.* functions.");
+        }
+
         var alreadyAssigned = await _db.UserCompanyRoles.AnyAsync(
             ucr => ucr.UserId == id && ucr.CompanyId == request.CompanyId && ucr.RoleId == request.RoleId, ct);
         if (alreadyAssigned)
