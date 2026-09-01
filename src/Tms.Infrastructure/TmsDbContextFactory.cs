@@ -42,5 +42,6 @@ public class TmsDbContextFactory : IDesignTimeDbContextFactory<TmsDbContext>
         public Guid? CompanyId => null;
         public bool IsPlatformSupport => true; // bypass filters — migrations operate on schema, not tenant data
         public Guid? SubcontractorId => null;
+        public Guid? ClientId => null;
     }
 }

@@ -26,4 +26,7 @@ public interface ITenantContext
     /// (internal staff, an ApiClient), the same way IsPlatformSupport is false for them.
     /// </summary>
     Guid? SubcontractorId { get; }
+
+    /// <summary>The Customer Portal's equivalent of <see cref="SubcontractorId"/> (§13.1) — restricting a ClientContact to their own Client's loads, invoices, and credit notes.</summary>
+    Guid? ClientId { get; }
 }

@@ -30,12 +30,28 @@ public class ClientsController : ControllerBase
     private readonly TmsDbContext _db;
     private readonly ITenantContext _tenantContext;
     private readonly CreditExposureService _creditExposure;
+    private readonly IAuthorizationService _authorizationService;
 
-    public ClientsController(TmsDbContext db, ITenantContext tenantContext, CreditExposureService creditExposure)
+    public ClientsController(
+        TmsDbContext db, ITenantContext tenantContext, CreditExposureService creditExposure, IAuthorizationService authorizationService)
     {
         _db = db;
         _tenantContext = tenantContext;
         _creditExposure = creditExposure;
+        _authorizationService = authorizationService;
+    }
+
+    /// <summary>
+    /// The row-level scoping and function check every Customer Portal action needs
+    /// (§13.1) — mirrors LoadsController's own CheckPortalClientAccessAsync.
+    /// </summary>
+    private async Task<ActionResult?> CheckPortalClientAccessAsync(Guid clientId, string requiredFunction)
+    {
+        if (_tenantContext.ClientId is null) return null;
+        if (clientId != _tenantContext.ClientId) return Forbid();
+
+        var authResult = await _authorizationService.AuthorizeAsync(User, requiredFunction);
+        return authResult.Succeeded ? null : Forbid();
     }
 
     [HttpGet]
@@ -95,12 +111,15 @@ public class ClientsController : ControllerBase
         return NoContent();
     }
 
-    /// <summary>Available credit, WIP, and AR outstanding for a client, in one currency (docs/architecture.html §4.3, §5.4, §11.2) — defaults to the client's primary currency; pass currencyId for one of its additional allowed currencies instead.</summary>
+    /// <summary>Available credit, WIP, and AR outstanding for a client, in one currency (docs/architecture.html §4.3, §5.4, §11.2) — defaults to the client's primary currency; pass currencyId for one of its additional allowed currencies instead. Also the Customer Portal's own credit status widget (§13.2) — "why a new load might be blocked," without a support ticket.</summary>
     [HttpGet("{id:guid}/credit-status")]
     public async Task<ActionResult<CreditStatus>> CreditStatus(Guid id, Guid? currencyId, CancellationToken ct)
     {
         var client = await _db.Clients.FirstOrDefaultAsync(c => c.Id == id, ct);
         if (client is null) return NotFound();
+
+        var portalCheck = await CheckPortalClientAccessAsync(id, "portal.client.viewloads");
+        if (portalCheck is not null) return portalCheck;
 
         var resolvedCurrencyId = currencyId ?? client.CurrencyId;
         if (await _creditExposure.ResolveCreditLimitAsync(client, resolvedCurrencyId, ct) is null)
@@ -201,11 +220,14 @@ public class ClientsController : ControllerBase
         return NoContent();
     }
 
-    /// <summary>Invoices raised against a client (docs/architecture.html §11.2).</summary>
+    /// <summary>Invoices raised against a client (docs/architecture.html §11.2) — also the Customer Portal's own invoice list (§13.2).</summary>
     [HttpGet("{id:guid}/invoices")]
     public async Task<ActionResult<IEnumerable<InvoiceResponse>>> Invoices(Guid id, CancellationToken ct)
     {
         if (!await _db.Clients.AnyAsync(c => c.Id == id, ct)) return NotFound();
+
+        var portalCheck = await CheckPortalClientAccessAsync(id, "portal.client.viewinvoices");
+        if (portalCheck is not null) return portalCheck;
 
         var invoices = await _db.Invoices
             .Include(i => i.Lines)
@@ -216,11 +238,14 @@ public class ClientsController : ControllerBase
         return Ok(invoices.Select(InvoicesController.ToResponse));
     }
 
-    /// <summary>Credit notes raised against a client (docs/architecture.html §10.1, §11.2) — invoice-correcting and standalone alike.</summary>
+    /// <summary>Credit notes raised against a client (docs/architecture.html §10.1, §11.2) — invoice-correcting and standalone alike. Also the Customer Portal's own credit note list (§13.2).</summary>
     [HttpGet("{id:guid}/credit-notes")]
     public async Task<ActionResult<IEnumerable<CreditNoteResponse>>> CreditNotes(Guid id, CancellationToken ct)
     {
         if (!await _db.Clients.AnyAsync(c => c.Id == id, ct)) return NotFound();
+
+        var portalCheck = await CheckPortalClientAccessAsync(id, "portal.client.viewinvoices");
+        if (portalCheck is not null) return portalCheck;
 
         var creditNotes = await _db.Set<CreditNote>()
             .Include(cn => cn.Lines)

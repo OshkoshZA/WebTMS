@@ -52,10 +52,12 @@ public class JwtTokenService
         // [Authorize(Policy = "...")] attribute anywhere in the API.
         claims.AddRange(functionCodes.Distinct().Select(f => new Claim("function", f)));
 
-        // A Supplier Portal contact (§13.1) — the row-level scoping claim
-        // TenantContextMiddleware reads into ITenantContext.SubcontractorId.
+        // A Supplier or Customer Portal contact (§13.1) — the row-level scoping claim
+        // TenantContextMiddleware reads into ITenantContext.SubcontractorId/ClientId.
         if (user.SubcontractorId is Guid subcontractorId)
             claims.Add(new Claim("subcontractor_id", subcontractorId.ToString()));
+        if (user.ClientId is Guid clientId)
+            claims.Add(new Claim("portal_client_id", clientId.ToString()));
 
         return BuildToken(claims);
     }

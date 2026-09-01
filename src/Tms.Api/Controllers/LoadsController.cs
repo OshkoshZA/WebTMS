@@ -87,15 +87,45 @@ public class LoadsController : ControllerBase
         _exceptions = exceptions;
     }
 
+    /// <summary>
+    /// The row-level scoping and function check every Customer Portal action needs
+    /// (§13.1) — internal staff (ClientId null on the caller's context) are entirely
+    /// unaffected. A portal contact must both own the load's client and hold the
+    /// specific portal.client.* function for the action they're attempting.
+    /// </summary>
+    private async Task<ActionResult?> CheckPortalClientAccessAsync(Guid loadClientId, string requiredFunction)
+    {
+        if (_tenantContext.ClientId is null) return null;
+        if (loadClientId != _tenantContext.ClientId) return Forbid();
+
+        var authResult = await _authorizationService.AuthorizeAsync(User, requiredFunction);
+        return authResult.Succeeded ? null : Forbid();
+    }
+
+    /// <summary>Also the Customer Portal's own load list (§13.2) — a portal caller sees only their own Client's loads regardless of what the rest of this query would otherwise return.</summary>
     [HttpGet]
     public async Task<ActionResult<IEnumerable<Load>>> List(CancellationToken ct)
-        => Ok(await _db.Loads.OrderByDescending(l => l.Id).ToListAsync(ct));
+    {
+        var query = _db.Loads.AsQueryable();
+        if (_tenantContext.ClientId is Guid ownClientId)
+        {
+            var authResult = await _authorizationService.AuthorizeAsync(User, "portal.client.viewloads");
+            if (!authResult.Succeeded) return Forbid();
+            query = query.Where(l => l.ClientId == ownClientId);
+        }
 
+        return Ok(await query.OrderByDescending(l => l.Id).ToListAsync(ct));
+    }
+
+    /// <summary>Also the Customer Portal's own self-service booking (§13.2, gated by portal.client.createload) — subject to the same credit hard stop as every other channel below, no special exemption. A portal caller can only ever book for their own Client, regardless of what ClientId they pass.</summary>
     [HttpPost]
     public async Task<ActionResult<Load>> Create(CreateLoadRequest request, CancellationToken ct)
     {
         if (_tenantContext.TenantId is null || _tenantContext.CompanyId is null)
             return Unauthorized("Request is missing a resolved Tenant/Company context.");
+
+        var portalCheck = await CheckPortalClientAccessAsync(request.ClientId, "portal.client.createload");
+        if (portalCheck is not null) return portalCheck;
 
         var client = await _db.Clients.FirstOrDefaultAsync(c => c.Id == request.ClientId, ct);
         if (client is null) return NotFound($"Client {request.ClientId} was not found.");
@@ -142,14 +172,23 @@ public class LoadsController : ControllerBase
     public async Task<ActionResult<Load>> Get(Guid id, CancellationToken ct)
     {
         var load = await _db.Loads.Include(l => l.Legs).FirstOrDefaultAsync(l => l.Id == id, ct);
-        return load is null ? NotFound() : Ok(load);
+        if (load is null) return NotFound();
+
+        var portalCheck = await CheckPortalClientAccessAsync(load.ClientId, "portal.client.viewloads");
+        if (portalCheck is not null) return portalCheck;
+
+        return Ok(load);
     }
 
+    /// <summary>Also the Customer Portal's own load tracking view (§13.2), following the same status lifecycle (§5.2) shown to internal staff.</summary>
     [HttpGet("{id:guid}/tracking")]
     public async Task<ActionResult<LoadTrackingResponse>> Tracking(Guid id, CancellationToken ct)
     {
         var load = await _db.Loads.Include(l => l.Legs).FirstOrDefaultAsync(l => l.Id == id, ct);
         if (load is null) return NotFound();
+
+        var portalCheck = await CheckPortalClientAccessAsync(load.ClientId, "portal.client.viewloads");
+        if (portalCheck is not null) return portalCheck;
 
         var history = await _db.LoadStatusHistories
             .Where(h => h.LoadId == id)

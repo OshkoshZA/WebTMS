@@ -18,4 +18,5 @@ public class HttpTenantContext : ITenantContext, ICurrentUserAccessor
     public Guid? UserId { get; set; }
     public string? ApiClientId { get; set; }
     public Guid? SubcontractorId { get; set; }
+    public Guid? ClientId { get; set; }
 }

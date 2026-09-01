@@ -41,18 +41,32 @@ public class CreditNotesController : ControllerBase
     private readonly TmsDbContext _db;
     private readonly ITenantContext _tenantContext;
     private readonly CreditExposureService _creditExposure;
+    private readonly IAuthorizationService _authorizationService;
 
-    public CreditNotesController(TmsDbContext db, ITenantContext tenantContext, CreditExposureService creditExposure)
+    public CreditNotesController(
+        TmsDbContext db, ITenantContext tenantContext, CreditExposureService creditExposure, IAuthorizationService authorizationService)
     {
         _db = db;
         _tenantContext = tenantContext;
         _creditExposure = creditExposure;
+        _authorizationService = authorizationService;
     }
 
+    /// <summary>Also the Customer Portal's own credit note list (§13.1, §13.2) — a portal caller is pinned to their own Client's credit notes regardless of what clientId they pass.</summary>
     [HttpGet]
-    public async Task<ActionResult<IEnumerable<CreditNoteResponse>>> List(CancellationToken ct)
+    public async Task<ActionResult<IEnumerable<CreditNoteResponse>>> List(Guid? clientId, CancellationToken ct)
     {
-        var creditNotes = await _db.Set<CreditNote>().Include(cn => cn.Lines).OrderByDescending(cn => cn.IssueDate).ToListAsync(ct);
+        if (_tenantContext.ClientId is Guid ownClientId)
+        {
+            var authResult = await _authorizationService.AuthorizeAsync(User, "portal.client.viewinvoices");
+            if (!authResult.Succeeded) return Forbid();
+            clientId = ownClientId;
+        }
+
+        var query = _db.Set<CreditNote>().Include(cn => cn.Lines).AsQueryable();
+        if (clientId is Guid c) query = query.Where(cn => cn.ClientId == c);
+
+        var creditNotes = await query.OrderByDescending(cn => cn.IssueDate).ToListAsync(ct);
         return Ok(creditNotes.Select(ToResponse));
     }
 
@@ -60,6 +74,8 @@ public class CreditNotesController : ControllerBase
     public async Task<ActionResult<CreditNoteResponse>> Get(Guid id, CancellationToken ct)
     {
         var creditNote = await _db.Set<CreditNote>().Include(cn => cn.Lines).FirstOrDefaultAsync(cn => cn.Id == id, ct);
+        if (creditNote is not null && !_tenantContext.CanAccessClient(creditNote.ClientId)) return Forbid();
+
         return creditNote is null ? NotFound() : Ok(ToResponse(creditNote));
     }
 

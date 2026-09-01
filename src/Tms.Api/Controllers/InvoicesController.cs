@@ -37,17 +37,30 @@ public class InvoicesController : ControllerBase
 {
     private readonly TmsDbContext _db;
     private readonly ITenantContext _tenantContext;
+    private readonly IAuthorizationService _authorizationService;
 
-    public InvoicesController(TmsDbContext db, ITenantContext tenantContext)
+    public InvoicesController(TmsDbContext db, ITenantContext tenantContext, IAuthorizationService authorizationService)
     {
         _db = db;
         _tenantContext = tenantContext;
+        _authorizationService = authorizationService;
     }
 
+    /// <summary>Also the Customer Portal's own invoice list (§13.1, §13.2) — a portal caller is pinned to their own Client's invoices regardless of what clientId they pass.</summary>
     [HttpGet]
-    public async Task<ActionResult<IEnumerable<InvoiceResponse>>> List(CancellationToken ct)
+    public async Task<ActionResult<IEnumerable<InvoiceResponse>>> List(Guid? clientId, CancellationToken ct)
     {
-        var invoices = await _db.Invoices.Include(i => i.Lines).OrderByDescending(i => i.IssueDate).ToListAsync(ct);
+        if (_tenantContext.ClientId is Guid ownClientId)
+        {
+            var authResult = await _authorizationService.AuthorizeAsync(User, "portal.client.viewinvoices");
+            if (!authResult.Succeeded) return Forbid();
+            clientId = ownClientId;
+        }
+
+        var query = _db.Invoices.Include(i => i.Lines).AsQueryable();
+        if (clientId is Guid c) query = query.Where(i => i.ClientId == c);
+
+        var invoices = await query.OrderByDescending(i => i.IssueDate).ToListAsync(ct);
         return Ok(invoices.Select(ToResponse));
     }
 
@@ -55,6 +68,8 @@ public class InvoicesController : ControllerBase
     public async Task<ActionResult<InvoiceResponse>> Get(Guid id, CancellationToken ct)
     {
         var invoice = await _db.Invoices.Include(i => i.Lines).FirstOrDefaultAsync(i => i.Id == id, ct);
+        if (invoice is not null && !_tenantContext.CanAccessClient(invoice.ClientId)) return Forbid();
+
         return invoice is null ? NotFound() : Ok(ToResponse(invoice));
     }
 

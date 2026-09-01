@@ -277,7 +277,15 @@ public static class DevelopmentSeeder
             ("portal.subcontractor.acknowledgeconfirmation",
              "A Supplier Portal contact accepting or declining their own Subcontractor's Load Confirmation (§8.2, §13.3)."),
             ("portal.subcontractor.uploadpod",
-             "A Supplier Portal contact submitting their own Subcontractor's leg debrief — POD and any additional claims (§09, §13.3).")
+             "A Supplier Portal contact submitting their own Subcontractor's leg debrief — POD and any additional claims (§09, §13.3)."),
+            ("client.contact.manage",
+             "Create, deactivate, and reactivate a Client's Customer Portal contacts (§13.1) — distinct from client.master.manage, since granting a customer's staff a portal login is a different kind of sensitive than editing the client's own master data."),
+            ("portal.client.viewloads",
+             "A Customer Portal contact's own view of their Client's loads, tracking, and credit status (§13.2) — never granted to internal staff, whose equivalent access needs no separate function."),
+            ("portal.client.viewinvoices",
+             "A Customer Portal contact's own view of their Client's invoices and credit notes (§13.2)."),
+            ("portal.client.createload",
+             "A Customer Portal contact's self-service load booking (§13.2) — still subject to the same credit hard stop as every other channel (§5.4); no special exemption.")
         };
 
         var adminRole = await roleManager.FindByNameAsync(AdminRoleName);
