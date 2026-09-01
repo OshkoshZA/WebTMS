@@ -194,3 +194,8 @@ app.UseAuthorization();
 app.MapControllers();
 
 app.Run();
+
+// Exposes the top-level-statement Program class (implicitly internal) to
+// Tms.Api.Tests' WebApplicationFactory<Program>, which needs a public type from
+// this assembly to boot the app in-process.
+public partial class Program { }
