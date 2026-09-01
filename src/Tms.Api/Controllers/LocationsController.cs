@@ -32,13 +32,20 @@ public class LocationsController : ControllerBase
         _tenantContext = tenantContext;
     }
 
+    /// <summary>Never part of either portal's documented scope, so any portal contact is Forbidden outright — matching every other master-data controller's own equivalent fix.</summary>
     [HttpGet]
     public async Task<ActionResult<IEnumerable<Location>>> List(CancellationToken ct)
-        => Ok(await _db.Locations.OrderBy(l => l.Name).ToListAsync(ct));
+    {
+        if (_tenantContext.SubcontractorId is not null || _tenantContext.ClientId is not null) return Forbid();
+
+        return Ok(await _db.Locations.OrderBy(l => l.Name).ToListAsync(ct));
+    }
 
     [HttpGet("{id:guid}")]
     public async Task<ActionResult<Location>> Get(Guid id, CancellationToken ct)
     {
+        if (_tenantContext.SubcontractorId is not null || _tenantContext.ClientId is not null) return Forbid();
+
         var location = await _db.Locations.FirstOrDefaultAsync(l => l.Id == id, ct);
         return location is null ? NotFound() : Ok(location);
     }

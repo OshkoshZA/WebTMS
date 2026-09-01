@@ -30,13 +30,20 @@ public class CommoditiesController : ControllerBase
         _tenantContext = tenantContext;
     }
 
+    /// <summary>Never part of either portal's documented scope, so any portal contact is Forbidden outright — matching every other master-data controller's own equivalent fix.</summary>
     [HttpGet]
     public async Task<ActionResult<IEnumerable<Commodity>>> List(CancellationToken ct)
-        => Ok(await _db.Commodities.OrderBy(c => c.Code).ToListAsync(ct));
+    {
+        if (_tenantContext.SubcontractorId is not null || _tenantContext.ClientId is not null) return Forbid();
+
+        return Ok(await _db.Commodities.OrderBy(c => c.Code).ToListAsync(ct));
+    }
 
     [HttpGet("{id:guid}")]
     public async Task<ActionResult<Commodity>> Get(Guid id, CancellationToken ct)
     {
+        if (_tenantContext.SubcontractorId is not null || _tenantContext.ClientId is not null) return Forbid();
+
         var commodity = await _db.Commodities.FirstOrDefaultAsync(c => c.Id == id, ct);
         return commodity is null ? NotFound() : Ok(commodity);
     }

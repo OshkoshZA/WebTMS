@@ -31,13 +31,20 @@ public class CostCentresController : ControllerBase
         _tenantContext = tenantContext;
     }
 
+    /// <summary>Never part of either portal's documented scope, so any portal contact is Forbidden outright — matching every other master-data controller's own equivalent fix.</summary>
     [HttpGet]
     public async Task<ActionResult<IEnumerable<CostCentre>>> List(CancellationToken ct)
-        => Ok(await _db.CostCentres.OrderBy(c => c.Code).ToListAsync(ct));
+    {
+        if (_tenantContext.SubcontractorId is not null || _tenantContext.ClientId is not null) return Forbid();
+
+        return Ok(await _db.CostCentres.OrderBy(c => c.Code).ToListAsync(ct));
+    }
 
     [HttpGet("{id:guid}")]
     public async Task<ActionResult<CostCentre>> Get(Guid id, CancellationToken ct)
     {
+        if (_tenantContext.SubcontractorId is not null || _tenantContext.ClientId is not null) return Forbid();
+
         var costCentre = await _db.CostCentres.FirstOrDefaultAsync(c => c.Id == id, ct);
         return costCentre is null ? NotFound() : Ok(costCentre);
     }

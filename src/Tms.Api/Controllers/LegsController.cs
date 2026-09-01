@@ -146,12 +146,14 @@ public class LegsController : ControllerBase
             .FirstOrDefaultAsync(d => d.LoadLegId == id, ct);
         if (debrief is null) return NotFound();
 
-        if (_tenantContext.SubcontractorId is not null)
-        {
-            var legSubcontractorId = await _db.LoadLegs.Where(l => l.Id == id).Select(l => l.SubcontractorId).FirstOrDefaultAsync(ct);
-            var portalCheck = await CheckPortalAccessAsync(legSubcontractorId, "portal.subcontractor.viewlegs");
-            if (portalCheck is not null) return portalCheck;
-        }
+        // Unconditional, not `if (_tenantContext.SubcontractorId is not null)` — that
+        // gate only ran the check for a Supplier Portal contact and let a Customer
+        // Portal contact (SubcontractorId null, ClientId set) fall through both
+        // branches and read any leg's debrief in the tenant, the exact bug class
+        // 2463fac fixed on this controller's other actions, just missed here.
+        var legSubcontractorId = await _db.LoadLegs.Where(l => l.Id == id).Select(l => l.SubcontractorId).FirstOrDefaultAsync(ct);
+        var portalCheck = await CheckPortalAccessAsync(legSubcontractorId, "portal.subcontractor.viewlegs");
+        if (portalCheck is not null) return portalCheck;
 
         return Ok(ToResponse(debrief));
     }

@@ -40,13 +40,20 @@ public class DriversController : ControllerBase
         _tenantContext = tenantContext;
     }
 
+    /// <summary>Never part of either portal's documented scope — exposes personal data (LicenceCode, LicenceExpiry, PdpExpiry) about internal employees, so any portal contact is Forbidden outright.</summary>
     [HttpGet]
     public async Task<ActionResult<IEnumerable<Driver>>> List(CancellationToken ct)
-        => Ok(await _db.Drivers.OrderBy(d => d.Name).ToListAsync(ct));
+    {
+        if (_tenantContext.SubcontractorId is not null || _tenantContext.ClientId is not null) return Forbid();
+
+        return Ok(await _db.Drivers.OrderBy(d => d.Name).ToListAsync(ct));
+    }
 
     [HttpGet("{id:guid}")]
     public async Task<ActionResult<Driver>> Get(Guid id, CancellationToken ct)
     {
+        if (_tenantContext.SubcontractorId is not null || _tenantContext.ClientId is not null) return Forbid();
+
         var driver = await _db.Drivers.FirstOrDefaultAsync(d => d.Id == id, ct);
         return driver is null ? NotFound() : Ok(driver);
     }

@@ -27,13 +27,20 @@ public class ExpenseTypesController : ControllerBase
         _tenantContext = tenantContext;
     }
 
+    /// <summary>Never part of either portal's documented scope, so any portal contact is Forbidden outright — matching every other master-data controller's own equivalent fix.</summary>
     [HttpGet]
     public async Task<ActionResult<IEnumerable<ExpenseType>>> List(CancellationToken ct)
-        => Ok(await _db.ExpenseTypes.OrderBy(t => t.Code).ToListAsync(ct));
+    {
+        if (_tenantContext.SubcontractorId is not null || _tenantContext.ClientId is not null) return Forbid();
+
+        return Ok(await _db.ExpenseTypes.OrderBy(t => t.Code).ToListAsync(ct));
+    }
 
     [HttpGet("{id:guid}")]
     public async Task<ActionResult<ExpenseType>> Get(Guid id, CancellationToken ct)
     {
+        if (_tenantContext.SubcontractorId is not null || _tenantContext.ClientId is not null) return Forbid();
+
         var type = await _db.ExpenseTypes.FirstOrDefaultAsync(t => t.Id == id, ct);
         return type is null ? NotFound() : Ok(type);
     }

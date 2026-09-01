@@ -42,13 +42,20 @@ public class VehiclesController : ControllerBase
         _tenantContext = tenantContext;
     }
 
+    /// <summary>Never part of either portal's documented scope, so any portal contact is Forbidden outright — matching every other master-data controller's own equivalent fix.</summary>
     [HttpGet]
     public async Task<ActionResult<IEnumerable<Vehicle>>> List(CancellationToken ct)
-        => Ok(await _db.Vehicles.OrderBy(v => v.FleetNo).ToListAsync(ct));
+    {
+        if (_tenantContext.SubcontractorId is not null || _tenantContext.ClientId is not null) return Forbid();
+
+        return Ok(await _db.Vehicles.OrderBy(v => v.FleetNo).ToListAsync(ct));
+    }
 
     [HttpGet("{id:guid}")]
     public async Task<ActionResult<Vehicle>> Get(Guid id, CancellationToken ct)
     {
+        if (_tenantContext.SubcontractorId is not null || _tenantContext.ClientId is not null) return Forbid();
+
         var vehicle = await _db.Vehicles.FirstOrDefaultAsync(v => v.Id == id, ct);
         return vehicle is null ? NotFound() : Ok(vehicle);
     }

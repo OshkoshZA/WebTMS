@@ -37,9 +37,12 @@ public class FinancialYearsController : ControllerBase
         _tenantContext = tenantContext;
     }
 
+    /// <summary>Never part of either portal's documented scope — the Company's own financial-calendar structure, so any portal contact is Forbidden outright, matching FinancialPeriodsController's own equivalent actions.</summary>
     [HttpGet]
     public async Task<ActionResult<IEnumerable<FinancialYearResponse>>> List(CancellationToken ct)
     {
+        if (_tenantContext.SubcontractorId is not null || _tenantContext.ClientId is not null) return Forbid();
+
         var years = await _db.FinancialYears.Include(y => y.Periods).OrderBy(y => y.StartDate).ToListAsync(ct);
         return Ok(years.Select(ToResponse));
     }
@@ -47,6 +50,8 @@ public class FinancialYearsController : ControllerBase
     [HttpGet("{id:guid}")]
     public async Task<ActionResult<FinancialYearResponse>> Get(Guid id, CancellationToken ct)
     {
+        if (_tenantContext.SubcontractorId is not null || _tenantContext.ClientId is not null) return Forbid();
+
         var year = await _db.FinancialYears.Include(y => y.Periods).FirstOrDefaultAsync(y => y.Id == id, ct);
         return year is null ? NotFound() : Ok(ToResponse(year));
     }

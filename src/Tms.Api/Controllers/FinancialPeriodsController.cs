@@ -36,9 +36,12 @@ public class FinancialPeriodsController : ControllerBase
         _tenantContext = tenantContext;
     }
 
+    /// <summary>Never part of either portal's documented scope — the Company's own financial-calendar structure, so any portal contact is Forbidden outright, same as DebtorsAging below.</summary>
     [HttpGet]
     public async Task<ActionResult<IEnumerable<FinancialPeriodResponse>>> List([FromQuery] Guid? financialYearId, CancellationToken ct)
     {
+        if (_tenantContext.SubcontractorId is not null || _tenantContext.ClientId is not null) return Forbid();
+
         var query = _db.FinancialPeriods.AsQueryable();
         if (financialYearId is Guid yearId) query = query.Where(p => p.FinancialYearId == yearId);
 
@@ -49,6 +52,8 @@ public class FinancialPeriodsController : ControllerBase
     [HttpGet("{id:guid}")]
     public async Task<ActionResult<FinancialPeriodResponse>> Get(Guid id, CancellationToken ct)
     {
+        if (_tenantContext.SubcontractorId is not null || _tenantContext.ClientId is not null) return Forbid();
+
         var period = await _db.FinancialPeriods.FirstOrDefaultAsync(p => p.Id == id, ct);
         return period is null ? NotFound() : Ok(ToResponse(period));
     }

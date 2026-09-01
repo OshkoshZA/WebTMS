@@ -129,6 +129,23 @@ public class RolesController : ControllerBase
         var function = await _db.Functions.FirstOrDefaultAsync(f => f.Id == request.FunctionId, ct);
         if (function is null) return NotFound($"Function {request.FunctionId} was not found.");
 
+        // SubcontractorContactsController/ClientContactsController.Create and
+        // UsersController.AddCompanyRole only validate a Role's functions are
+        // portal.*-only at the moment a portal contact is assigned it — without this
+        // check, later granting e.g. finance.invoice.manage to a Role a contact
+        // already holds would silently upgrade them to a full internal-staff session
+        // on their next token refresh, with no error and no re-validation anywhere
+        // else in the chain.
+        if (!function.Code.StartsWith("portal.", StringComparison.Ordinal))
+        {
+            var heldByPortalContact = await _db.UserCompanyRoles
+                .Where(ucr => ucr.RoleId == id)
+                .Join(_db.Users, ucr => ucr.UserId, u => u.Id, (ucr, u) => u)
+                .AnyAsync(u => u.SubcontractorId != null || u.ClientId != null, ct);
+            if (heldByPortalContact)
+                return BadRequest("This role is already assigned to a portal contact — only portal.* functions can be granted to it.");
+        }
+
         var alreadyGranted = await _db.RoleFunctions.AnyAsync(rf => rf.RoleId == id && rf.FunctionId == request.FunctionId, ct);
         if (alreadyGranted)
             return Conflict("This role already has that function.");

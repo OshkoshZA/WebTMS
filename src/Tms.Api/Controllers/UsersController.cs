@@ -46,9 +46,12 @@ public class UsersController : ControllerBase
         _currentUser = currentUser;
     }
 
+    /// <summary>Never part of either portal's documented scope — exposes every internal user (and every other party's portal contacts) with their email/display name/company-role assignments, so any portal contact is Forbidden outright.</summary>
     [HttpGet]
     public async Task<ActionResult<IEnumerable<UserResponse>>> List(CancellationToken ct)
     {
+        if (_tenantContext.SubcontractorId is not null || _tenantContext.ClientId is not null) return Forbid();
+
         var users = await _db.Users.OrderBy(u => u.Email).ToListAsync(ct);
         var companyRolesByUser = await GetCompanyRolesByUserAsync(users.Select(u => u.Id), ct);
 
@@ -58,6 +61,8 @@ public class UsersController : ControllerBase
     [HttpGet("{id:guid}")]
     public async Task<ActionResult<UserResponse>> Get(Guid id, CancellationToken ct)
     {
+        if (_tenantContext.SubcontractorId is not null || _tenantContext.ClientId is not null) return Forbid();
+
         var user = await _db.Users.FirstOrDefaultAsync(u => u.Id == id, ct);
         if (user is null) return NotFound();
 
