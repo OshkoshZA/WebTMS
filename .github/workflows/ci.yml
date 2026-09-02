@@ -55,10 +55,12 @@ jobs:
       - name: Build
         run: dotnet build --no-restore --configuration Release
 
-      - name: Install dotnet-ef
-        run: |
-          dotnet tool install --global dotnet-ef
-          echo "$HOME/.dotnet/tools" >> "$GITHUB_PATH"
+      - name: Restore local dotnet tools
+        # The repo already pins dotnet-ef via .config/dotnet-tools.json (a *local* tool
+        # manifest) — that takes priority over any global install for `dotnet ef ...`
+        # invocations made from inside this repo, so `dotnet tool install --global` was
+        # both unnecessary and beside the point: the local manifest just needed restoring.
+        run: dotnet tool restore
 
       - name: Apply database migrations
         # No --startup-project: TmsDbContextFactory (Tms.Infrastructure) is a standalone
