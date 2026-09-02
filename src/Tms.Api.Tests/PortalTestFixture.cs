@@ -28,7 +28,7 @@ public class PortalTestFixture : IAsyncLifetime
     private const string AdminPassword = "DemoAdmin#2026";
     private const string PortalPassword = "PortalTestPass#2026";
 
-    private readonly WebApplicationFactory<Program> _factory = new();
+    private readonly WebApplicationFactory<Program> _factory = TestApiFactory.Create();
     private readonly string _runId = Guid.NewGuid().ToString("N")[..8];
 
     public HttpClient StaffClient { get; private set; } = null!;

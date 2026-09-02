@@ -27,7 +27,7 @@ public class StaffTestFixture : IAsyncLifetime
     private const string AdminEmail = "admin@demo.local";
     private const string AdminPassword = "DemoAdmin#2026";
 
-    private readonly WebApplicationFactory<Program> _factory = new();
+    private readonly WebApplicationFactory<Program> _factory = TestApiFactory.Create();
 
     public HttpClient StaffClient { get; private set; } = null!;
 

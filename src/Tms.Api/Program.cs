@@ -128,12 +128,16 @@ builder.Services.AddRateLimiter(options =>
     // token, refresh, §11.1) — exactly what brute-force/credential-stuffing
     // targets, so it gets its own limit regardless of the not-yet-established
     // caller identity the global limiter above would otherwise partition by.
+    // Configurable (default 10/min) so Tms.Api.Tests, which runs every fixture and
+    // race test's fresh logins from the same loopback IP, can raise it via
+    // WithWebHostBuilder instead of the whole suite fighting production's limit.
+    var authPermitLimit = builder.Configuration.GetValue("RateLimiting:AuthPermitLimit", 10);
     options.AddPolicy("auth", httpContext =>
     {
         var ip = httpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown";
         return RateLimitPartition.GetFixedWindowLimiter(ip, _ => new FixedWindowRateLimiterOptions
         {
-            PermitLimit = 10,
+            PermitLimit = authPermitLimit,
             Window = TimeSpan.FromMinutes(1),
             QueueLimit = 0
         });
