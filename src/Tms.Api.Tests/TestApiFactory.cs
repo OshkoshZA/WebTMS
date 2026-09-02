@@ -5,10 +5,13 @@ namespace Tms.Api.Tests;
 
 /// <summary>
 /// Boots the real API (WebApplicationFactory&lt;Program&gt;, real DI, real SQL Server —
-/// no mocks) with the auth-endpoint rate limit (Program.cs, §11.1, 10/min per IP in
-/// production) raised, since every fixture and race test in this project logs in from
-/// the same loopback IP and production's limit is sized for a single real client, not
-/// a full test run's worth of concurrent logins.
+/// no mocks) with two rate limits raised for the test run: the auth-endpoint limit
+/// (Program.cs, §11.1, 10/min per IP in production — every fixture and race test logs
+/// in from the same loopback IP) and the global per-user limit embedded in each staff
+/// JWT at issuance (JwtTokenService, 300/min in production — the whole suite runs
+/// through one shared, pre-authenticated staff session and comfortably clears that in
+/// well under a minute). Both are sized for one real caller, not a full test run's
+/// worth of traffic funneled through a single session.
 /// </summary>
 internal static class TestApiFactory
 {
@@ -17,6 +20,7 @@ internal static class TestApiFactory
             builder.ConfigureAppConfiguration((_, config) =>
                 config.AddInMemoryCollection(new Dictionary<string, string?>
                 {
-                    ["RateLimiting:AuthPermitLimit"] = "1000"
+                    ["RateLimiting:AuthPermitLimit"] = "1000",
+                    ["RateLimiting:DefaultUserPermitLimit"] = "100000"
                 })));
 }

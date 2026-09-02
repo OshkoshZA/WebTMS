@@ -44,7 +44,11 @@ public class JwtTokenService
             new(ClaimTypes.Email, user.Email ?? string.Empty),
             new("tenant_id", user.TenantId.ToString()),
             new("company_id", companyId.ToString()),
-            new("rate_limit", DefaultUserRateLimitPerMinute.ToString())
+            // Configurable so Tms.Api.Tests can raise it — the suite now runs 100+ tests
+            // through one shared, pre-authenticated staff session and comfortably clears
+            // 300 requests within a single fixed window, a volume no real interactive
+            // user producing a naturally-paced click stream ever would.
+            new("rate_limit", _configuration.GetValue("RateLimiting:DefaultUserPermitLimit", DefaultUserRateLimitPerMinute).ToString())
         };
         claims.AddRange(roleNames.Select(r => new Claim(ClaimTypes.Role, r)));
         // One claim per granted function (§07) — FunctionAuthorizationHandler checks these,

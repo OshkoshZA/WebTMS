@@ -24,8 +24,8 @@ public class StaffTestFixture : IAsyncLifetime
     public const string CommodityId = "4cf021f4-50e1-4532-b7a4-627035eadef6";
     public const string UnitOfMeasureId = "a155c6f5-8dde-41f3-a54d-0ccdfd02d7cd";
     public const string CurrencyId = "2366a0f6-9b2d-41c0-9d73-2d38d0e45e8b";
-    private const string AdminEmail = "admin@demo.local";
-    private const string AdminPassword = "DemoAdmin#2026";
+    public const string AdminEmail = "admin@demo.local";
+    public const string AdminPassword = "DemoAdmin#2026";
 
     private readonly WebApplicationFactory<Program> _factory = TestApiFactory.Create();
 
@@ -72,6 +72,9 @@ public class StaffTestFixture : IAsyncLifetime
 
     /// <summary>Two independent, already-authenticated staff sessions for a concurrency-race test to fire requests from — pulled from the pool rather than logging in fresh.</summary>
     public (HttpClient First, HttpClient Second) GetRaceClients() => (_raceClient1, _raceClient2);
+
+    /// <summary>A fresh, unauthenticated client against the same in-process app — for AuthController tests that need to control login/refresh/logout themselves rather than reusing StaffClient's already-issued token.</summary>
+    public HttpClient CreateAnonymousClient() => _factory.CreateClient();
 
     public async Task<Guid> CreateClientAsync(string suffix, decimal creditLimit = 1_000_000m)
     {
