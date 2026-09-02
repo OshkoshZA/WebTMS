@@ -6,12 +6,6 @@ on:
   pull_request:
     branches: [main]
 
-# This container is thrown away at the end of every job run, so a literal fallback
-# password is fine here — override with a repo secret (Settings > Secrets > Actions >
-# CI_SQL_SA_PASSWORD) if you'd rather not have even a throwaway credential in the file.
-env:
-  SA_PASSWORD: ${{ secrets.CI_SQL_SA_PASSWORD || 'TmsCiEphemeral2026!' }}
-
 # The API leans on real SQL Server behavior (sp_getapplock, unique-index races) that an
 # in-memory provider can't exercise, so Tms.Api.Tests boots the real app against a real
 # database (see src/Tms.Api.Tests) — CI needs an actual SQL Server instance, not a mock.
@@ -24,20 +18,27 @@ jobs:
         image: mcr.microsoft.com/mssql/server:2022-latest
         env:
           ACCEPT_EULA: "Y"
-          MSSQL_SA_PASSWORD: ${{ env.SA_PASSWORD }}
+          # This container is thrown away at the end of every job run, so a literal
+          # fallback password is fine here — override with a repo secret (Settings >
+          # Secrets > Actions > CI_SQL_SA_PASSWORD) if you'd rather not have even a
+          # throwaway credential in the file. Repeated inline in each of the three spots
+          # that need it below: the `env` context isn't available inside `services.env`
+          # or a job-level `env:` block, so a shared workflow-level `env:` var can't be
+          # referenced from either — only `secrets`/`vars`/`github` contexts can.
+          MSSQL_SA_PASSWORD: ${{ secrets.CI_SQL_SA_PASSWORD || 'TmsCiEphemeral2026!' }}
         ports:
           - 1433:1433
         options: >-
-          --health-cmd="/opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -P '${{ env.SA_PASSWORD }}' -C -Q 'SELECT 1' || exit 1"
+          --health-cmd="/opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -P '${{ secrets.CI_SQL_SA_PASSWORD || 'TmsCiEphemeral2026!' }}' -C -Q 'SELECT 1' || exit 1"
           --health-interval=10s
           --health-timeout=5s
           --health-retries=10
 
     env:
-      ConnectionStrings__Default: Server=localhost;Database=Tms;User Id=sa;Password=${{ env.SA_PASSWORD }};TrustServerCertificate=True;
+      ConnectionStrings__Default: Server=localhost;Database=Tms;User Id=sa;Password=${{ secrets.CI_SQL_SA_PASSWORD || 'TmsCiEphemeral2026!' }};TrustServerCertificate=True;
       Jwt__Issuer: tms-api
       Jwt__Audience: tms-clients
-      # Same reasoning as SA_PASSWORD above: only ever signs tokens for this ephemeral CI database.
+      # Same reasoning as MSSQL_SA_PASSWORD above: only ever signs tokens for this ephemeral CI database.
       Jwt__SigningKey: ci-only-jwt-signing-key-32-bytes-minimum-never-used-outside-this-workflow
 
     steps:
