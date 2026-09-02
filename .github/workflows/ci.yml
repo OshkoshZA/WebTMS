@@ -1,0 +1,73 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+# This container is thrown away at the end of every job run, so a literal fallback
+# password is fine here — override with a repo secret (Settings > Secrets > Actions >
+# CI_SQL_SA_PASSWORD) if you'd rather not have even a throwaway credential in the file.
+env:
+  SA_PASSWORD: ${{ secrets.CI_SQL_SA_PASSWORD || 'TmsCiEphemeral2026!' }}
+
+# The API leans on real SQL Server behavior (sp_getapplock, unique-index races) that an
+# in-memory provider can't exercise, so Tms.Api.Tests boots the real app against a real
+# database (see src/Tms.Api.Tests) — CI needs an actual SQL Server instance, not a mock.
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+
+    services:
+      sqlserver:
+        image: mcr.microsoft.com/mssql/server:2022-latest
+        env:
+          ACCEPT_EULA: "Y"
+          MSSQL_SA_PASSWORD: ${{ env.SA_PASSWORD }}
+        ports:
+          - 1433:1433
+        options: >-
+          --health-cmd="/opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -P '${{ env.SA_PASSWORD }}' -C -Q 'SELECT 1' || exit 1"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=10
+
+    env:
+      ConnectionStrings__Default: Server=localhost;Database=Tms;User Id=sa;Password=${{ env.SA_PASSWORD }};TrustServerCertificate=True;
+      Jwt__Issuer: tms-api
+      Jwt__Audience: tms-clients
+      # Same reasoning as SA_PASSWORD above: only ever signs tokens for this ephemeral CI database.
+      Jwt__SigningKey: ci-only-jwt-signing-key-32-bytes-minimum-never-used-outside-this-workflow
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "8.0.x"
+
+      - name: Restore
+        run: dotnet restore
+
+      - name: Build
+        run: dotnet build --no-restore --configuration Release
+
+      - name: Install dotnet-ef
+        run: |
+          dotnet tool install --global dotnet-ef
+          echo "$HOME/.dotnet/tools" >> "$GITHUB_PATH"
+
+      - name: Apply database migrations
+        # No --startup-project: TmsDbContextFactory (Tms.Infrastructure) is a standalone
+        # IDesignTimeDbContextFactory, so Tms.Infrastructure is both the migrations and
+        # startup project — Tms.Api doesn't reference Microsoft.EntityFrameworkCore.Design
+        # and doesn't need to. The factory reads ConnectionStrings__Default from the
+        # environment here (there's no user secrets store in CI).
+        run: dotnet ef database update --project src/Tms.Infrastructure --configuration Release
+
+      - name: Test
+        # WebApplicationFactory<Program> forces the Development environment for the
+        # in-process test host regardless of ASPNETCORE_ENVIRONMENT, so DevelopmentSeeder
+        # runs here and seeds the demo tenant/admin user every fixture relies on.
+        run: dotnet test src/Tms.Api.Tests --no-build --configuration Release

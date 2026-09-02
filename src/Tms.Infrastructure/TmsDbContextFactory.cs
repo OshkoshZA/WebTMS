@@ -10,7 +10,9 @@ namespace Tms.Infrastructure;
 /// Lets `dotnet ef migrations add` / `database update` run without a live ASP.NET Core
 /// host or a resolvable ITenantContext — design time never needs a real tenant. The
 /// connection string comes from Tms.Api's user secrets (the same store `dotnet run`
-/// uses), never from a hardcoded value here — see README.md "Getting started".
+/// uses) locally, or from a ConnectionStrings__Default environment variable in CI where
+/// there's no user secrets store (see .github/workflows/ci.yml) — never from a
+/// hardcoded value here, see README.md "Getting started".
 /// </summary>
 public class TmsDbContextFactory : IDesignTimeDbContextFactory<TmsDbContext>
 {
@@ -22,6 +24,7 @@ public class TmsDbContextFactory : IDesignTimeDbContextFactory<TmsDbContext>
     {
         var configuration = new ConfigurationBuilder()
             .AddUserSecrets(TmsApiUserSecretsId)
+            .AddEnvironmentVariables()
             .Build();
 
         var connectionString = configuration.GetConnectionString("Default")
