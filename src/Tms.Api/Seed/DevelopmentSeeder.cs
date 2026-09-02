@@ -123,15 +123,33 @@ public static class DevelopmentSeeder
         }
     }
 
+    /// <summary>
+    /// Fixed, well-known ids for the reference-data rows Tms.Api.Tests hardcodes as
+    /// fixture constants (StaffTestFixture/PortalTestFixture) — not randomly generated,
+    /// unlike everything else this method seeds. Before this fix, every one of these
+    /// entities (where seeded at all — CostCentre/Location/Commodity/Vehicle/Driver
+    /// weren't seeded here at all) got the default client-side Guid.NewGuid(), which
+    /// only ever "worked" for the test suite by accident: those specific ids happened to
+    /// match rows created ad hoc, at some point, directly against this project's own
+    /// long-lived local dev database — never reproducible on any other one, which is
+    /// exactly what broke this project's very first CI run once one existed (every
+    /// fixture's very first real POST, referencing one of these ids, 404ing against a
+    /// row that had never actually been created on a truly fresh database).
+    /// </summary>
     private static async Task<(Tenant Tenant, Company Company)> SeedTenantAndCompanyAsync(TmsDbContext db)
     {
         var country = new Country { Code = "ZA", Name = "South Africa" };
-        var currency = new Currency { Code = "ZAR", Name = "South African Rand", Symbol = "R" };
+        var currency = new Currency { Id = Guid.Parse("2366a0f6-9b2d-41c0-9d73-2d38d0e45e8b"), Code = "ZAR", Name = "South African Rand", Symbol = "R" };
+        // A second currency, granted to a Client/Subcontractor via its currency allow-list
+        // (§4.3) in the AddCurrency tests — deliberately not the Company's own primary.
+        var secondaryCurrency = new Currency { Id = Guid.Parse("983cc062-2b8a-41d4-9209-a4b05f6dcc1d"), Code = "USD", Name = "US Dollar", Symbol = "$" };
         db.Countries.Add(country);
         db.Currencies.Add(currency);
+        db.Currencies.Add(secondaryCurrency);
 
+        var unitOfMeasure = new UnitOfMeasure { Id = Guid.Parse("a155c6f5-8dde-41f3-a54d-0ccdfd02d7cd"), Code = "PER_LOAD", Description = "Per load" };
         db.UnitsOfMeasure.AddRange(
-            new UnitOfMeasure { Code = "PER_LOAD", Description = "Per load" },
+            unitOfMeasure,
             new UnitOfMeasure { Code = "PER_KM", Description = "Per kilometre" },
             new UnitOfMeasure { Code = "PER_TON", Description = "Per ton" },
             new UnitOfMeasure { Code = "PER_PALLET", Description = "Per pallet" },
@@ -139,7 +157,7 @@ public static class DevelopmentSeeder
             new UnitOfMeasure { Code = "PER_LITRE", Description = "Per litre" });
 
         db.LoadTypes.AddRange(
-            new Tms.Modules.Loads.LoadType { Code = "FTL", Description = "Full truckload" },
+            new Tms.Modules.Loads.LoadType { Id = Guid.Parse("6C48E708-7D45-4381-881D-16CC9E39ED24"), Code = "FTL", Description = "Full truckload" },
             new Tms.Modules.Loads.LoadType { Code = "LTL", Description = "Less than truckload" },
             new Tms.Modules.Loads.LoadType { Code = "BULK", Description = "Bulk" });
 
@@ -160,6 +178,61 @@ public static class DevelopmentSeeder
             CurrencyId = currency.Id
         };
         db.Companies.Add(company);
+
+        db.CostCentres.Add(new Tms.Modules.Loads.CostCentre
+        {
+            Id = Guid.Parse("AAAAAAAA-0000-0000-0000-000000000003"),
+            TenantId = tenant.Id,
+            CompanyId = company.Id,
+            Code = "DEMO-CC",
+            Name = "Demo Cost Centre"
+        });
+        db.Locations.AddRange(
+            new Tms.Modules.Fleet.Location
+            {
+                Id = Guid.Parse("aaaaaaaa-0000-0000-0000-000000000001"),
+                TenantId = tenant.Id,
+                CompanyId = company.Id,
+                Name = "Demo Origin",
+                Province = "Gauteng",
+                CountryId = country.Id
+            },
+            new Tms.Modules.Fleet.Location
+            {
+                Id = Guid.Parse("aaaaaaaa-0000-0000-0000-000000000002"),
+                TenantId = tenant.Id,
+                CompanyId = company.Id,
+                Name = "Demo Destination",
+                Province = "Western Cape",
+                CountryId = country.Id
+            });
+        db.Commodities.Add(new Tms.Modules.Loads.Commodity
+        {
+            Id = Guid.Parse("4cf021f4-50e1-4532-b7a4-627035eadef6"),
+            TenantId = tenant.Id,
+            CompanyId = company.Id,
+            Code = "DEMO-CMD",
+            Name = "Demo Commodity",
+            DefaultUnitOfMeasureId = unitOfMeasure.Id
+        });
+        db.Vehicles.Add(new Tms.Modules.Fleet.Vehicle
+        {
+            Id = Guid.Parse("bbbbbbbb-0000-0000-0000-000000000001"),
+            TenantId = tenant.Id,
+            CompanyId = company.Id,
+            FleetNo = "DEMO-01",
+            Registration = "DEMO001GP",
+            Type = Tms.Modules.Fleet.VehicleType.Horse
+        });
+        db.Drivers.Add(new Tms.Modules.Fleet.Driver
+        {
+            Id = Guid.Parse("a05273b3-36b7-454a-9029-7b09a3068db0"),
+            TenantId = tenant.Id,
+            CompanyId = company.Id,
+            EmployeeNo = "DEMO-EMP-01",
+            Name = "Demo Driver",
+            LicenceCode = "C1"
+        });
 
         await db.SaveChangesAsync();
         return (tenant, company);
