@@ -125,6 +125,7 @@ public class TmsDbContext : IdentityDbContext<ApplicationUser, ApplicationRole, 
 
     // Privacy (§14)
     public DbSet<RetentionPolicy> RetentionPolicies => Set<RetentionPolicy>();
+    public DbSet<DataSubjectRequest> DataSubjectRequests => Set<DataSubjectRequest>();
 
     // Exceptions (§16.1) — the shared cross-module attention mechanism
     public DbSet<ExceptionRecord> ExceptionRecords => Set<ExceptionRecord>();

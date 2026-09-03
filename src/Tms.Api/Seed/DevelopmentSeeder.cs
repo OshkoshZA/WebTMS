@@ -484,7 +484,9 @@ public static class DevelopmentSeeder
             ("audit.view",
              "View and export the platform's audit trail (§12.3) — separate from the function that makes each change, so day-to-day operators can act without also being able to review or quietly obscure their own history."),
             ("finance.exchangerate.manage",
-             "Capture or override a currency pair's rate for a given date (§4.3), when a provider rate is missing or disputed.")
+             "Capture or override a currency pair's rate for a given date (§4.3), when a provider rate is missing or disputed."),
+            ("privacy.dsr.manage",
+             "Log, fulfill, and reject data subject requests — access, rectification, erasure, portability (§14.3).")
         };
 
         var adminRole = await roleManager.FindByNameAsync(AdminRoleName);
