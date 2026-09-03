@@ -41,11 +41,30 @@ public static class DevelopmentSeeder
         Company? company = null;
         if (isFirstRun)
         {
-            (tenant, company) = await SeedTenantAndCompanyAsync(db);
-            logger.LogInformation("Seeded development Tenant '{Tenant}' and Company '{Company}'.", tenant.Name, company.LegalName);
+            try
+            {
+                (tenant, company) = await SeedTenantAndCompanyAsync(db);
+                logger.LogInformation("Seeded development Tenant '{Tenant}' and Company '{Company}'.", tenant.Name, company.LegalName);
+            }
+            catch (DbUpdateException)
+            {
+                // Lost a startup race against another concurrent app instance seeding the
+                // exact same fixed reference-data ids (§ below) — Tms.Api.Tests boots more
+                // than one WebApplicationFactory<Program> instance against the same
+                // database, and xUnit runs different collections in parallel by default,
+                // so two instances' very first SeedAsync call can both see "no Tenant yet"
+                // before either commits. Whichever one loses falls back to what the winner
+                // actually created instead of treating this as a real failure — the same
+                // unique-index-plus-catch(DbUpdateException) pattern already used
+                // elsewhere in this codebase for exactly this class of race.
+                db.ChangeTracker.Clear();
+                isFirstRun = false;
+                tenant = await db.Tenants.IgnoreQueryFilters().FirstAsync();
+                company = await db.Companies.IgnoreQueryFilters().FirstAsync(c => c.TenantId == tenant.Id);
+            }
         }
 
-        await EnsureStarterRolesAsync(roleManager, tenant!.Id, logger);
+        await EnsureStarterRolesAsync(db, roleManager, tenant!.Id, logger);
         await EnsureFunctionCatalogAsync(db, roleManager, logger);
 
         if (isFirstRun)
@@ -279,14 +298,24 @@ public static class DevelopmentSeeder
     /// staff, Integration Service for machine clients (§11.1) — without granting
     /// either any functions by default. Runs every startup.
     /// </summary>
-    private static async Task EnsureStarterRolesAsync(RoleManager<ApplicationRole> roleManager, Guid tenantId, ILogger logger)
+    private static async Task EnsureStarterRolesAsync(TmsDbContext db, RoleManager<ApplicationRole> roleManager, Guid tenantId, ILogger logger)
     {
         foreach (var roleName in new[] { AdminRoleName, IntegrationServiceRoleName })
         {
             if (await roleManager.FindByNameAsync(roleName) is null)
             {
-                await roleManager.CreateAsync(new ApplicationRole { Name = roleName, TenantId = tenantId });
-                logger.LogInformation("Created starter role '{Role}'.", roleName);
+                try
+                {
+                    await roleManager.CreateAsync(new ApplicationRole { Name = roleName, TenantId = tenantId });
+                    logger.LogInformation("Created starter role '{Role}'.", roleName);
+                }
+                catch (DbUpdateException)
+                {
+                    // Same startup race as SeedTenantAndCompanyAsync — another concurrent
+                    // app instance (Tms.Api.Tests boots more than one WebApplicationFactory
+                    // against the same database) created this role first.
+                    db.ChangeTracker.Clear();
+                }
             }
         }
     }
@@ -370,7 +399,17 @@ public static class DevelopmentSeeder
             {
                 function = new Function { Code = code, Description = description };
                 db.Functions.Add(function);
-                await db.SaveChangesAsync();
+                try
+                {
+                    await db.SaveChangesAsync();
+                }
+                catch (DbUpdateException)
+                {
+                    // Same startup race as SeedTenantAndCompanyAsync — another concurrent
+                    // app instance registered this Function first.
+                    db.ChangeTracker.Clear();
+                    function = await db.Functions.FirstAsync(f => f.Code == code);
+                }
             }
 
             if (adminRole is null) continue; // no demo tenant seeded yet — nothing to grant to
@@ -380,8 +419,17 @@ public static class DevelopmentSeeder
             if (!alreadyGranted)
             {
                 db.RoleFunctions.Add(new RoleFunction { RoleId = adminRole.Id, FunctionId = function.Id });
-                await db.SaveChangesAsync();
-                logger.LogInformation("Granted function '{Function}' to role '{Role}'", code, AdminRoleName);
+                try
+                {
+                    await db.SaveChangesAsync();
+                    logger.LogInformation("Granted function '{Function}' to role '{Role}'", code, AdminRoleName);
+                }
+                catch (DbUpdateException)
+                {
+                    // Same race — another concurrent app instance granted this function
+                    // to the role first.
+                    db.ChangeTracker.Clear();
+                }
             }
         }
     }
