@@ -16,7 +16,10 @@ using Tms.Shared;
 
 namespace Tms.Api.Controllers;
 
-public record CreateLoadRequest(Guid ClientId, string ReferenceNo, Guid LoadTypeId, string? CreditOverrideReason = null);
+public record CreateLoadRequest(
+    Guid ClientId, string ReferenceNo, Guid LoadTypeId, string? CreditOverrideReason = null,
+    DateTimeOffset? PickupWindowStart = null, DateTimeOffset? PickupWindowEnd = null,
+    DateTimeOffset? DeliveryWindowStart = null, DateTimeOffset? DeliveryWindowEnd = null);
 
 public record AddLoadLegRequest(
     int SequenceNo,
@@ -43,6 +46,12 @@ public record AddCommodityLineRequest(
 public record HoldLoadRequest(string Reason);
 
 public record LoadTrackingResponse(Guid LoadId, LoadStatus Status, IReadOnlyList<LoadLeg> Legs, IReadOnlyList<LoadStatusHistory> History);
+
+public record LoadLegMarginResponse(
+    Guid LegId, Guid? SellCurrencyId, decimal SellTotal, Guid? BuyCurrencyId, decimal BuyTotal,
+    decimal? ExchangeRateUsed, decimal? ConvertedBuyTotal, decimal? Margin, string? Note);
+
+public record LoadMarginResponse(Guid LoadId, IReadOnlyList<LoadLegMarginResponse> Legs);
 
 /// <summary>
 /// Load capture, the leg-based status lifecycle, and the credit-limit hard stop
@@ -177,7 +186,11 @@ public class LoadsController : ControllerBase
             ClientId = request.ClientId,
             ReferenceNo = request.ReferenceNo,
             LoadTypeId = request.LoadTypeId,
-            Status = LoadStatus.Booked
+            Status = LoadStatus.Booked,
+            PickupWindowStart = request.PickupWindowStart,
+            PickupWindowEnd = request.PickupWindowEnd,
+            DeliveryWindowStart = request.DeliveryWindowStart,
+            DeliveryWindowEnd = request.DeliveryWindowEnd
         };
 
         _db.Loads.Add(load);
@@ -197,6 +210,95 @@ public class LoadsController : ControllerBase
         if (portalCheck is not null) return portalCheck;
 
         return Ok(load);
+    }
+
+    /// <summary>
+    /// Buy→sell converted margin per leg (§4.3) — never part of either portal's
+    /// documented scope (a Subcontractor's own portal view deliberately shows accrual
+    /// status "without exposing internal margin data," §16.4), so any portal caller is
+    /// Forbidden outright, unlike Get/Tracking above which scope a Client contact to
+    /// their own load instead of blocking them entirely.
+    /// </summary>
+    [HttpGet("{id:guid}/margin")]
+    public async Task<ActionResult<LoadMarginResponse>> Margin(Guid id, CancellationToken ct)
+    {
+        if (_tenantContext.SubcontractorId is not null || _tenantContext.ClientId is not null) return Forbid();
+
+        var load = await _db.Loads.FirstOrDefaultAsync(l => l.Id == id, ct);
+        if (load is null) return NotFound();
+
+        var legs = await _db.LoadLegs.Where(l => l.LoadId == id).ToListAsync(ct);
+        var legIds = legs.Select(l => l.Id).ToList();
+
+        var rateLinesByLeg = await _db.RateLines
+            .Where(r => r.SourceType == RateLineSourceType.CommodityLine)
+            .Join(_db.Set<CommodityLine>(), r => r.SourceId, cl => cl.Id, (r, cl) => new { r, cl.LoadLegId })
+            .Where(x => legIds.Contains(x.LoadLegId))
+            .ToListAsync(ct);
+
+        var pickupDate = load.PickupWindowStart is DateTimeOffset pws ? DateOnly.FromDateTime(pws.UtcDateTime) : (DateOnly?)null;
+
+        var legResponses = new List<LoadLegMarginResponse>();
+        foreach (var leg in legs)
+        {
+            var sellLines = rateLinesByLeg.Where(x => x.LoadLegId == leg.Id && x.r.Direction == RateLineDirection.Sell).Select(x => x.r).ToList();
+            var buyLines = rateLinesByLeg.Where(x => x.LoadLegId == leg.Id && x.r.Direction == RateLineDirection.Buy).Select(x => x.r).ToList();
+
+            var sellCurrencyId = sellLines.FirstOrDefault()?.CurrencyId;
+            var sellTotal = sellLines.Sum(r => r.Amount);
+            var buyCurrencyId = buyLines.FirstOrDefault()?.CurrencyId;
+            var buyTotal = buyLines.Sum(r => r.Amount);
+
+            decimal? exchangeRateUsed = null;
+            decimal? convertedBuyTotal;
+            decimal? margin;
+            string? note = null;
+
+            if (buyCurrencyId is null)
+            {
+                // Own-fleet leg, or no buy RateLine captured yet — nothing to convert.
+                convertedBuyTotal = 0m;
+                margin = sellTotal;
+            }
+            else if (sellCurrencyId is null || buyCurrencyId == sellCurrencyId)
+            {
+                // No sell line yet, or both sides already in the same currency — no
+                // exchange rate needed either way.
+                convertedBuyTotal = buyTotal;
+                margin = sellTotal - buyTotal;
+            }
+            else if (pickupDate is null)
+            {
+                convertedBuyTotal = null;
+                margin = null;
+                note = "Load has no PickupWindowStart to anchor an exchange rate lookup.";
+            }
+            else
+            {
+                var rate = await _db.ExchangeRates
+                    .Where(e => e.FromCurrencyId == buyCurrencyId && e.ToCurrencyId == sellCurrencyId && e.EffectiveDate <= pickupDate)
+                    .OrderByDescending(e => e.EffectiveDate)
+                    .FirstOrDefaultAsync(ct);
+
+                if (rate is null)
+                {
+                    convertedBuyTotal = null;
+                    margin = null;
+                    note = $"No captured exchange rate for this currency pair on or before {pickupDate:yyyy-MM-dd}.";
+                }
+                else
+                {
+                    exchangeRateUsed = rate.Rate;
+                    convertedBuyTotal = buyTotal * rate.Rate;
+                    margin = sellTotal - convertedBuyTotal;
+                }
+            }
+
+            legResponses.Add(new LoadLegMarginResponse(
+                leg.Id, sellCurrencyId, sellTotal, buyCurrencyId, buyTotal, exchangeRateUsed, convertedBuyTotal, margin, note));
+        }
+
+        return Ok(new LoadMarginResponse(load.Id, legResponses));
     }
 
     /// <summary>Also the Customer Portal's own load tracking view (§13.2), following the same status lifecycle (§5.2) shown to internal staff.</summary>

@@ -482,7 +482,9 @@ public static class DevelopmentSeeder
             ("portal.client.createload",
              "A Customer Portal contact's self-service load booking (§13.2) — still subject to the same credit hard stop as every other channel (§5.4); no special exemption."),
             ("audit.view",
-             "View and export the platform's audit trail (§12.3) — separate from the function that makes each change, so day-to-day operators can act without also being able to review or quietly obscure their own history.")
+             "View and export the platform's audit trail (§12.3) — separate from the function that makes each change, so day-to-day operators can act without also being able to review or quietly obscure their own history."),
+            ("finance.exchangerate.manage",
+             "Capture or override a currency pair's rate for a given date (§4.3), when a provider rate is missing or disputed.")
         };
 
         var adminRole = await roleManager.FindByNameAsync(AdminRoleName);

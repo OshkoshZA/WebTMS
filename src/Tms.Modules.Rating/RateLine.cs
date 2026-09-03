@@ -33,3 +33,20 @@ public class RateLine : CompanyScopedEntity
     public decimal Quantity { get; set; }
     public decimal Amount { get; set; }
 }
+
+/// <summary>
+/// A captured/overridden daily rate for one currency pair (docs/architecture.html
+/// §4.3) — "1 unit of FromCurrency = Rate units of ToCurrency" on EffectiveDate.
+/// Deliberately one-directional: USD→ZAR and ZAR→USD are two independent rows, never
+/// auto-inverted, since a captured rate is a specific finance decision for that pair,
+/// not a pure mathematical identity. The automated daily-refresh background job §4.3
+/// also describes is out of scope for now — this only covers manual capture/override
+/// and the buy→sell conversion that reads from it.
+/// </summary>
+public class ExchangeRate : CompanyScopedEntity
+{
+    public Guid FromCurrencyId { get; set; }
+    public Guid ToCurrencyId { get; set; }
+    public DateOnly EffectiveDate { get; set; }
+    public decimal Rate { get; set; }
+}

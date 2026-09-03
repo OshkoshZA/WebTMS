@@ -101,8 +101,9 @@ public class TmsDbContext : IdentityDbContext<ApplicationUser, ApplicationRole, 
     public DbSet<CommodityLine> CommodityLines => Set<CommodityLine>();
     public DbSet<LoadConfirmation> LoadConfirmations => Set<LoadConfirmation>();
 
-    // Rating (§08)
+    // Rating (§08, §4.3)
     public DbSet<RateLine> RateLines => Set<RateLine>();
+    public DbSet<ExchangeRate> ExchangeRates => Set<ExchangeRate>();
 
     // Debrief (§09, §9.1)
     public DbSet<Modules.Debrief.Debrief> Debriefs => Set<Modules.Debrief.Debrief>();
@@ -158,6 +159,15 @@ public class TmsDbContext : IdentityDbContext<ApplicationUser, ApplicationRole, 
         modelBuilder.Entity<RateLine>().Property(r => r.Amount).HasPrecision(18, 2);
         modelBuilder.Entity<RateLine>().Property(r => r.Quantity).HasPrecision(18, 3);
         modelBuilder.Entity<RateLine>().Property(r => r.RatePerUnit).HasPrecision(18, 4);
+
+        // A captured/overridden rate for one currency pair on one date (§4.3) — unique
+        // per (Company, From, To, Date) so a POST for a pair/date that already has a
+        // captured rate is an update (an override), never a second conflicting row.
+        modelBuilder.Entity<ExchangeRate>().Property(e => e.Rate).HasPrecision(18, 6);
+        modelBuilder.Entity<ExchangeRate>()
+            .HasIndex(e => new { e.CompanyId, e.FromCurrencyId, e.ToCurrencyId, e.EffectiveDate })
+            .IsUnique()
+            .HasDatabaseName("ExchangeRateIndex");
 
         // A client/subcontractor's currency allow-list (§4.3) — each row a currency
         // beyond the party's own primary CurrencyId, which is always implicitly
