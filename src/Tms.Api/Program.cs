@@ -188,7 +188,25 @@ if (app.Environment.IsDevelopment())
     await Tms.Api.Seed.DevelopmentSeeder.SeedAsync(app.Services);
 }
 
+if (!app.Environment.IsDevelopment())
+{
+    app.UseHsts();
+}
+
 app.UseHttpsRedirection();
+
+// Baseline defense-in-depth response headers (no CORS policy: the SPAs — web/tms-app,
+// tms-customer-portal, tms-supplier-portal — all proxy /api/* through their own dev
+// server to this API rather than calling it cross-origin, per each one's vite.config.ts;
+// the same same-origin-via-reverse-proxy shape is assumed in production, so the browser
+// never actually makes a cross-origin request this API needs to answer for).
+app.Use(async (context, next) =>
+{
+    context.Response.Headers["X-Content-Type-Options"] = "nosniff";
+    context.Response.Headers["X-Frame-Options"] = "DENY";
+    context.Response.Headers["Referrer-Policy"] = "strict-origin-when-cross-origin";
+    await next();
+});
 
 app.UseAuthentication();
 app.UseRateLimiter(); // needs the User principal from UseAuthentication to partition by client_id/user id
