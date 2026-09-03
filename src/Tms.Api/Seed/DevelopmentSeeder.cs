@@ -35,42 +35,39 @@ public static class DevelopmentSeeder
         var roleManager = scope.ServiceProvider.GetRequiredService<RoleManager<ApplicationRole>>();
         var logger = scope.ServiceProvider.GetRequiredService<ILogger<object>>();
 
+        // Tms.Api.Tests boots more than one WebApplicationFactory<Program> instance
+        // against the same database, and xUnit runs different collections in parallel by
+        // default, so two app instances' very first SeedAsync call can run concurrently
+        // in real life — not just in principle. An application lock (the same
+        // sp_getapplock mechanism this project already uses elsewhere for exactly this
+        // class of problem) serializes the whole method across instances: the loser
+        // simply blocks until the winner's transaction commits, then re-reads a database
+        // that's already fully seeded — categorically ruling out every check-then-insert
+        // race this method makes, rather than patching each one individually as it
+        // surfaces (which a first attempt at this fix tried, and didn't fully catch).
+        await using var transaction = await db.Database.BeginTransactionAsync();
+        await db.Database.ExecuteSqlRawAsync(
+            "EXEC sp_getapplock @Resource = 'Tms.DevelopmentSeeder', @LockMode = 'Exclusive', @LockOwner = 'Transaction';");
+
         var tenant = await db.Tenants.IgnoreQueryFilters().FirstOrDefaultAsync();
         var isFirstRun = tenant is null;
 
         Company? company = null;
         if (isFirstRun)
         {
-            try
-            {
-                (tenant, company) = await SeedTenantAndCompanyAsync(db);
-                logger.LogInformation("Seeded development Tenant '{Tenant}' and Company '{Company}'.", tenant.Name, company.LegalName);
-            }
-            catch (DbUpdateException)
-            {
-                // Lost a startup race against another concurrent app instance seeding the
-                // exact same fixed reference-data ids (§ below) — Tms.Api.Tests boots more
-                // than one WebApplicationFactory<Program> instance against the same
-                // database, and xUnit runs different collections in parallel by default,
-                // so two instances' very first SeedAsync call can both see "no Tenant yet"
-                // before either commits. Whichever one loses falls back to what the winner
-                // actually created instead of treating this as a real failure — the same
-                // unique-index-plus-catch(DbUpdateException) pattern already used
-                // elsewhere in this codebase for exactly this class of race.
-                db.ChangeTracker.Clear();
-                isFirstRun = false;
-                tenant = await db.Tenants.IgnoreQueryFilters().FirstAsync();
-                company = await db.Companies.IgnoreQueryFilters().FirstAsync(c => c.TenantId == tenant.Id);
-            }
+            (tenant, company) = await SeedTenantAndCompanyAsync(db);
+            logger.LogInformation("Seeded development Tenant '{Tenant}' and Company '{Company}'.", tenant.Name, company.LegalName);
         }
 
-        await EnsureStarterRolesAsync(db, roleManager, tenant!.Id, logger);
+        await EnsureStarterRolesAsync(roleManager, tenant!.Id, logger);
         await EnsureFunctionCatalogAsync(db, roleManager, logger);
 
         if (isFirstRun)
         {
             await SeedAdminUserAsync(scope.ServiceProvider, db, tenant!, company!, roleManager, logger);
         }
+
+        await transaction.CommitAsync(); // releases the applock
 
         var dataProtectionProvider = scope.ServiceProvider.GetRequiredService<IDataProtectionProvider>();
         await EncryptLegacyPlaintextBankingDetailsAsync(db, dataProtectionProvider, logger);
@@ -253,6 +250,43 @@ public static class DevelopmentSeeder
             LicenceCode = "C1"
         });
 
+        // Invoicing, credit notes, and supplier-invoice matching (§10.1-§10.3) all
+        // require an Open FinancialPeriod for the company — with no financial calendar
+        // at all on a fresh database, every one of those 404s/409s with "No open
+        // financial period for this company". Mirrors FinancialYearsController.Create's
+        // own period-splitting logic: 12 monthly periods, starting from the first of the
+        // current month so "today" always falls inside period 1 (Open) regardless of
+        // which day of the month this seeder happens to run on.
+        var todayUtc = DateOnly.FromDateTime(DateTime.UtcNow);
+        var yearStart = new DateOnly(todayUtc.Year, todayUtc.Month, 1);
+        var yearEnd = yearStart.AddYears(1).AddDays(-1);
+        var financialYear = new Tms.Modules.Billing.FinancialYear
+        {
+            TenantId = tenant.Id,
+            CompanyId = company.Id,
+            YearLabel = $"FY{yearStart.Year}",
+            StartDate = yearStart,
+            EndDate = yearEnd,
+            Status = Tms.Modules.Billing.FinancialYearStatus.Open
+        };
+        var periodStart = yearStart;
+        for (var i = 1; i <= 12; i++)
+        {
+            var periodEnd = i == 12 ? yearEnd : periodStart.AddMonths(1).AddDays(-1);
+            financialYear.Periods.Add(new Tms.Modules.Billing.FinancialPeriod
+            {
+                TenantId = tenant.Id,
+                CompanyId = company.Id,
+                PeriodNumber = i,
+                Name = $"{financialYear.YearLabel} P{i}",
+                StartDate = periodStart,
+                EndDate = periodEnd,
+                Status = i == 1 ? Tms.Modules.Billing.FinancialPeriodStatus.Open : Tms.Modules.Billing.FinancialPeriodStatus.Future
+            });
+            periodStart = periodEnd.AddDays(1);
+        }
+        db.FinancialYears.Add(financialYear);
+
         await db.SaveChangesAsync();
         return (tenant, company);
     }
@@ -298,24 +332,14 @@ public static class DevelopmentSeeder
     /// staff, Integration Service for machine clients (§11.1) — without granting
     /// either any functions by default. Runs every startup.
     /// </summary>
-    private static async Task EnsureStarterRolesAsync(TmsDbContext db, RoleManager<ApplicationRole> roleManager, Guid tenantId, ILogger logger)
+    private static async Task EnsureStarterRolesAsync(RoleManager<ApplicationRole> roleManager, Guid tenantId, ILogger logger)
     {
         foreach (var roleName in new[] { AdminRoleName, IntegrationServiceRoleName })
         {
             if (await roleManager.FindByNameAsync(roleName) is null)
             {
-                try
-                {
-                    await roleManager.CreateAsync(new ApplicationRole { Name = roleName, TenantId = tenantId });
-                    logger.LogInformation("Created starter role '{Role}'.", roleName);
-                }
-                catch (DbUpdateException)
-                {
-                    // Same startup race as SeedTenantAndCompanyAsync — another concurrent
-                    // app instance (Tms.Api.Tests boots more than one WebApplicationFactory
-                    // against the same database) created this role first.
-                    db.ChangeTracker.Clear();
-                }
+                await roleManager.CreateAsync(new ApplicationRole { Name = roleName, TenantId = tenantId });
+                logger.LogInformation("Created starter role '{Role}'.", roleName);
             }
         }
     }
@@ -399,17 +423,7 @@ public static class DevelopmentSeeder
             {
                 function = new Function { Code = code, Description = description };
                 db.Functions.Add(function);
-                try
-                {
-                    await db.SaveChangesAsync();
-                }
-                catch (DbUpdateException)
-                {
-                    // Same startup race as SeedTenantAndCompanyAsync — another concurrent
-                    // app instance registered this Function first.
-                    db.ChangeTracker.Clear();
-                    function = await db.Functions.FirstAsync(f => f.Code == code);
-                }
+                await db.SaveChangesAsync();
             }
 
             if (adminRole is null) continue; // no demo tenant seeded yet — nothing to grant to
@@ -419,17 +433,8 @@ public static class DevelopmentSeeder
             if (!alreadyGranted)
             {
                 db.RoleFunctions.Add(new RoleFunction { RoleId = adminRole.Id, FunctionId = function.Id });
-                try
-                {
-                    await db.SaveChangesAsync();
-                    logger.LogInformation("Granted function '{Function}' to role '{Role}'", code, AdminRoleName);
-                }
-                catch (DbUpdateException)
-                {
-                    // Same race — another concurrent app instance granted this function
-                    // to the role first.
-                    db.ChangeTracker.Clear();
-                }
+                await db.SaveChangesAsync();
+                logger.LogInformation("Granted function '{Function}' to role '{Role}'", code, AdminRoleName);
             }
         }
     }
