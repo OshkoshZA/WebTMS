@@ -798,6 +798,7 @@ flowchart LR
             <li><strong>Integration Service</strong> — non-interactive, API-key based</li>
             <li><strong>Platform Support</strong> — our own operations staff only; narrow, break-glass, cross-tenant access, never assignable to a customer user, fully audited (§4.1, §12)</li>
           </ul>
+          <div class="note" style="margin-top:10px;"><strong>Implemented:</strong> DevelopmentSeeder now seeds Admin (all functions), Integration Service (none, by design), and all five operational roles above with functions matching their own description here — Dispatcher gets none, since nothing it does (creating/allocating loads, viewing fleet availability) is function-gated today. Verified live: <span class="mono">GET /api/v1/roles</span> shows Finance Clerk holding exactly costcentre.master.manage/finance.calendar.manage/finance.period.close/finance.invoice.manage/finance.creditnote.approve, Fleet Controller holding exactly vehicle.master.manage/driver.master.manage, and Dispatcher holding none. Platform Support is deliberately never seeded — that name is reserved (RolesController.IsReservedRoleName) and matched by TenantContextMiddleware.IsPlatformSupport as a pure string comparison bypassing every tenant/company query filter app-wide, so seeding it here would hand out a cross-tenant bypass through ordinary demo data instead of whatever narrow, audited, break-glass process a real one deserves.</div>
         </div>
       </div>
     </section>

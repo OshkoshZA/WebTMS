@@ -28,6 +28,34 @@ public static class DevelopmentSeeder
     private const string AdminRoleName = "Admin";
     private const string IntegrationServiceRoleName = "Integration Service";
 
+    // The rest of docs/architecture.html §07's "Starter roles" table — Admin and
+    // Integration Service are seeded separately above/below since neither is granted
+    // functions the same generic way (Admin gets every function via
+    // EnsureFunctionCatalogAsync; Integration Service gets none by design). Deliberately
+    // excludes "Platform Support": that name is reserved (RolesController.
+    // IsReservedRoleName) and matched by TenantContextMiddleware.IsPlatformSupport as a
+    // pure string comparison that bypasses every tenant/company query filter app-wide —
+    // seeding a role with that exact name, even in a demo tenant, would hand out a
+    // cross-tenant bypass through ordinary seed data instead of whatever narrow,
+    // audited, break-glass provisioning process a real "our own operations staff only"
+    // role deserves.
+    private static readonly IReadOnlyDictionary<string, string[]> OtherStarterRoleFunctions = new Dictionary<string, string[]>
+    {
+        // "create/allocate loads, view fleet availability" — LoadsController carries no
+        // function policy at all (open to any authenticated staff member already), and
+        // Vehicle/Driver List/Get are equally open, so Dispatcher has no functions of
+        // its own to grant today; the role still exists as an assignable identity.
+        ["Dispatcher"] = Array.Empty<string>(),
+        ["Fleet Controller"] = new[] { "vehicle.master.manage", "driver.master.manage" },
+        ["Finance Clerk"] = new[]
+        {
+            "costcentre.master.manage", "finance.calendar.manage", "finance.period.close",
+            "finance.invoice.manage", "finance.creditnote.approve"
+        },
+        ["Credit Controller"] = new[] { "client.master.manage", "client.creditlimit.override" },
+        ["Debrief Clerk"] = new[] { "debrief.approve", "exception.manage" }
+    };
+
     public static async Task SeedAsync(IServiceProvider services)
     {
         using var scope = services.CreateScope();
@@ -61,6 +89,7 @@ public static class DevelopmentSeeder
 
         await EnsureStarterRolesAsync(roleManager, tenant!.Id, logger);
         await EnsureFunctionCatalogAsync(db, roleManager, logger);
+        await GrantOtherStarterRoleFunctionsAsync(db, roleManager, logger);
 
         if (isFirstRun)
         {
@@ -328,18 +357,58 @@ public static class DevelopmentSeeder
     }
 
     /// <summary>
-    /// Ensures the demo tenant's starter roles (§07) exist — Admin for interactive
-    /// staff, Integration Service for machine clients (§11.1) — without granting
-    /// either any functions by default. Runs every startup.
+    /// Ensures every starter role in docs/architecture.html §07's own table exists,
+    /// except "Platform Support" (see OtherStarterRoleFunctions) — Admin for interactive
+    /// staff, Integration Service for machine clients (§11.1), and the five operational
+    /// roles (Dispatcher, Fleet Controller, Finance Clerk, Credit Controller, Debrief
+    /// Clerk), none of which are granted any functions here — that happens in
+    /// GrantOtherStarterRoleFunctionsAsync, after EnsureFunctionCatalogAsync has made
+    /// sure the functions they need actually exist. Runs every startup.
     /// </summary>
     private static async Task EnsureStarterRolesAsync(RoleManager<ApplicationRole> roleManager, Guid tenantId, ILogger logger)
     {
-        foreach (var roleName in new[] { AdminRoleName, IntegrationServiceRoleName })
+        var starterRoleNames = new[] { AdminRoleName, IntegrationServiceRoleName }
+            .Concat(OtherStarterRoleFunctions.Keys);
+
+        foreach (var roleName in starterRoleNames)
         {
             if (await roleManager.FindByNameAsync(roleName) is null)
             {
                 await roleManager.CreateAsync(new ApplicationRole { Name = roleName, TenantId = tenantId });
                 logger.LogInformation("Created starter role '{Role}'.", roleName);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Grants each of the five operational starter roles (§07) the functions matching
+    /// its own documented description — Fleet Controller gets vehicle/driver master
+    /// maintenance, Finance Clerk gets cost centres/calendar/period-close/invoicing,
+    /// Credit Controller gets client master data and the credit-limit override, Debrief
+    /// Clerk gets debrief approval and exception management. Dispatcher is deliberately
+    /// left with none: nothing it does (creating/allocating loads, viewing fleet
+    /// availability) is function-gated today. Runs every startup, after
+    /// EnsureFunctionCatalogAsync has made sure every function referenced here exists.
+    /// </summary>
+    private static async Task GrantOtherStarterRoleFunctionsAsync(TmsDbContext db, RoleManager<ApplicationRole> roleManager, ILogger logger)
+    {
+        foreach (var (roleName, functionCodes) in OtherStarterRoleFunctions)
+        {
+            var role = await roleManager.FindByNameAsync(roleName);
+            if (role is null) continue; // shouldn't happen — EnsureStarterRolesAsync always runs first
+
+            foreach (var code in functionCodes)
+            {
+                var function = await db.Functions.FirstOrDefaultAsync(f => f.Code == code);
+                if (function is null) continue; // a function this role expects hasn't been registered yet
+
+                var alreadyGranted = await db.RoleFunctions.AnyAsync(rf => rf.RoleId == role.Id && rf.FunctionId == function.Id);
+                if (!alreadyGranted)
+                {
+                    db.RoleFunctions.Add(new RoleFunction { RoleId = role.Id, FunctionId = function.Id });
+                    await db.SaveChangesAsync();
+                    logger.LogInformation("Granted function '{Function}' to role '{Role}'", code, roleName);
+                }
             }
         }
     }
