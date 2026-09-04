@@ -486,7 +486,9 @@ public static class DevelopmentSeeder
             ("finance.exchangerate.manage",
              "Capture or override a currency pair's rate for a given date (§4.3), when a provider rate is missing or disputed."),
             ("privacy.dsr.manage",
-             "Log, fulfill, and reject data subject requests — access, rectification, erasure, portability (§14.3).")
+             "Log, fulfill, and reject data subject requests — access, rectification, erasure, portability (§14.3)."),
+            ("privacy.retentionpolicy.manage",
+             "Set a Company's per-category retention configuration (§14.2) — separate from privacy.dsr.manage, since one configures the policy and the other acts on individual subjects under it.")
         };
 
         var adminRole = await roleManager.FindByNameAsync(AdminRoleName);

@@ -183,6 +183,14 @@ public class TmsDbContext : IdentityDbContext<ApplicationUser, ApplicationRole, 
             .IsUnique()
             .HasDatabaseName("SubcontractorCurrencyIndex");
 
+        // One retention configuration per (Company, DataCategory) — §14.2's own table has
+        // exactly one row per category, so a second PUT for the same category is always
+        // an update to the existing policy, never a second conflicting one.
+        modelBuilder.Entity<RetentionPolicy>()
+            .HasIndex(p => new { p.CompanyId, p.DataCategory })
+            .IsUnique()
+            .HasDatabaseName("RetentionPolicyIndex");
+
         modelBuilder.Entity<Load>()
             .HasMany(l => l.Legs)
             .WithOne()
