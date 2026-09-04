@@ -24,6 +24,7 @@ var builder = WebApplication.CreateBuilder(args);
 builder.Services.AddScoped<HttpTenantContext>();
 builder.Services.AddScoped<ITenantContext>(sp => sp.GetRequiredService<HttpTenantContext>());
 builder.Services.AddScoped<ICurrentUserAccessor>(sp => sp.GetRequiredService<HttpTenantContext>());
+builder.Services.AddScoped<PendingPiiRedactionTracker>();
 builder.Services.AddScoped<AuditSaveChangesInterceptor>();
 builder.Services.AddScoped<Tms.Api.Auth.JwtTokenService>();
 builder.Services.AddScoped<Tms.Api.Auth.RefreshTokenService>();

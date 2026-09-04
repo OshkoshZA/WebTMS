@@ -118,6 +118,29 @@ public class DataSubjectRequestTests
     }
 
     [Fact]
+    public async Task Erasure_redacts_the_pre_erasure_name_from_the_audit_entry_it_produces()
+    {
+        var suffix = Guid.NewGuid().ToString("N")[..8];
+        var driverId = await CreateDriverAsync(suffix);
+
+        var createResponse = await _fx.StaffClient.PostAsJsonAsync("/api/v1/data-subject-requests",
+            new { subjectType = 0, subjectId = driverId, requestType = 2 }); // Erasure
+        createResponse.EnsureSuccessStatusCode();
+        var dsr = await createResponse.Content.ReadFromJsonAsync<DsrDto>();
+
+        (await _fx.StaffClient.PostAsync($"/api/v1/drivers/{driverId}/deactivate", null)).EnsureSuccessStatusCode();
+        (await _fx.StaffClient.PostAsync($"/api/v1/data-subject-requests/{dsr!.Id}/fulfill", null)).EnsureSuccessStatusCode();
+
+        // Two Update entries exist by now (Deactivate, then Erasure) — find the one the
+        // erasure itself produced rather than assuming it's the only one.
+        var entries = await _fx.StaffClient.GetFromJsonAsync<List<AuditEntryDto>>(
+            $"/api/v1/audit-entries?entityType=Driver&entityId={driverId}&action=1"); // Update
+        var erasureEntry = Assert.Single(entries!, e => e.OldValueJson.Contains("[REDACTED"));
+        Assert.DoesNotContain("DSR Test Driver", erasureEntry.OldValueJson);
+        Assert.Contains($"DSR-{suffix}", erasureEntry.OldValueJson); // EmployeeNo — untouched by the redaction
+    }
+
+    [Fact]
     public async Task Erasure_of_a_client_contact_anonymizes_email_and_display_name_once_deactivated()
     {
         var suffix = Guid.NewGuid().ToString("N")[..8];
@@ -146,6 +169,7 @@ public class DataSubjectRequestTests
         createResponse.EnsureSuccessStatusCode();
         var dsr = await createResponse.Content.ReadFromJsonAsync<DsrDto>();
 
+        var beforeErasure = DateTimeOffset.UtcNow;
         (await _fx.StaffClient.PostAsync($"/api/v1/data-subject-requests/{dsr!.Id}/fulfill", null)).EnsureSuccessStatusCode();
 
         var contacts = await _fx.StaffClient.GetFromJsonAsync<List<ClientContactDto>>($"/api/v1/clients/{clientId}/contacts");
@@ -153,10 +177,25 @@ public class DataSubjectRequestTests
         Assert.Equal("Erased User", contact.DisplayName);
         Assert.StartsWith("erased-", contact.Email);
         Assert.EndsWith("@erased.local", contact.Email);
+
+        // The erasure itself updates ApplicationUser three times (Email, then UserName,
+        // then DisplayName) — every one of those AuditEntry rows must redact DisplayName
+        // consistently, not just the row that happens to change it. Scoped to entries at
+        // or after the fulfill call so the earlier Deactivate's own Update entry (which
+        // legitimately still shows the real pre-erasure name) doesn't confuse the check.
+        // Email is deliberately out of this pass's scope (see docs/architecture.html
+        // §14.3), so it still shows its real pre-erasure value in whichever row captured it.
+        var entries = await _fx.StaffClient.GetFromJsonAsync<List<AuditEntryDto>>(
+            $"/api/v1/audit-entries?entityType=ApplicationUser&entityId={contactId}&action=1&from={Uri.EscapeDataString(beforeErasure.ToString("O"))}"); // Update
+        Assert.True(entries!.Count >= 1);
+        Assert.All(entries, e => Assert.DoesNotContain("DSR Test Contact", e.OldValueJson));
+        Assert.Contains(entries, e => e.OldValueJson.Contains("[REDACTED"));
+        Assert.Contains(entries, e => e.OldValueJson.Contains($"dsr-{suffix}@example.com"));
     }
 
     private sealed record IdDto(Guid Id);
     private sealed record DsrDto(Guid Id, int Status, DateTimeOffset ReceivedAt, DateTimeOffset DueDate, string? RejectionReason);
     private sealed record DriverExportDto(string Name);
     private sealed record ClientContactDto(Guid Id, string Email, string DisplayName);
+    private sealed record AuditEntryDto(string OldValueJson);
 }

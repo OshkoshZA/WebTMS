@@ -48,14 +48,17 @@ public class DataSubjectRequestsController : ControllerBase
     private readonly UserManager<ApplicationUser> _userManager;
     private readonly ICurrentUserAccessor _currentUser;
     private readonly ITenantContext _tenantContext;
+    private readonly PendingPiiRedactionTracker _pendingRedactions;
 
     public DataSubjectRequestsController(
-        TmsDbContext db, UserManager<ApplicationUser> userManager, ICurrentUserAccessor currentUser, ITenantContext tenantContext)
+        TmsDbContext db, UserManager<ApplicationUser> userManager, ICurrentUserAccessor currentUser,
+        ITenantContext tenantContext, PendingPiiRedactionTracker pendingRedactions)
     {
         _db = db;
         _userManager = userManager;
         _currentUser = currentUser;
         _tenantContext = tenantContext;
+        _pendingRedactions = pendingRedactions;
     }
 
     [HttpGet]
@@ -202,6 +205,7 @@ public class DataSubjectRequestsController : ControllerBase
             if (driver.Status != DriverStatus.Deactivated)
                 return Conflict("This Driver must be deactivated before an erasure request can be fulfilled.");
 
+            _pendingRedactions.MarkForRedaction(nameof(Driver), driver.Id.ToString(), nameof(Driver.Name));
             driver.Name = $"Erased Driver {driver.Id.ToString("N")[..8]}";
             await _db.SaveChangesAsync(ct);
             return null;
@@ -211,6 +215,12 @@ public class DataSubjectRequestsController : ControllerBase
         if (user is null) return NotFound("The subject record no longer exists.");
         if (user.Status != UserStatus.Deactivated)
             return Conflict("This user must be deactivated before an erasure request can be fulfilled.");
+
+        // Marked before any of the three SaveChanges calls below (SetEmailAsync and
+        // SetUserNameAsync each trigger their own via UserManager's own UpdateUserAsync) —
+        // every AuditEntry this one erasure produces must redact DisplayName consistently,
+        // not just the row that happens to change it.
+        _pendingRedactions.MarkForRedaction(nameof(ApplicationUser), user.Id.ToString(), nameof(ApplicationUser.DisplayName));
 
         var anonymizedHandle = $"erased-{user.Id.ToString("N")[..8]}@erased.local";
         await _userManager.SetEmailAsync(user, anonymizedHandle);

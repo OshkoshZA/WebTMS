@@ -17,10 +17,12 @@ namespace Tms.Modules.Audit;
 public class AuditSaveChangesInterceptor : SaveChangesInterceptor
 {
     private readonly ICurrentUserAccessor _currentUser;
+    private readonly PendingPiiRedactionTracker _pendingRedactions;
 
-    public AuditSaveChangesInterceptor(ICurrentUserAccessor currentUser)
+    public AuditSaveChangesInterceptor(ICurrentUserAccessor currentUser, PendingPiiRedactionTracker pendingRedactions)
     {
         _currentUser = currentUser;
+        _pendingRedactions = pendingRedactions;
     }
 
     public override InterceptionResult<int> SavingChanges(DbContextEventData eventData, InterceptionResult<int> result)
@@ -61,17 +63,20 @@ public class AuditSaveChangesInterceptor : SaveChangesInterceptor
             };
             if (action is null) continue;
 
+            var entityType = entry.Entity.GetType().Name;
+            var entityId = ResolveEntityId(entry);
+
             entries.Add(new AuditEntry
             {
                 TenantId = ResolveTenantId(entry, context),
                 CompanyId = ResolveCompanyId(entry),
-                EntityType = entry.Entity.GetType().Name,
-                EntityId = ResolveEntityId(entry),
+                EntityType = entityType,
+                EntityId = entityId,
                 Action = action.Value,
                 ChangedByUserId = _currentUser.UserId,
                 ChangedByApiClientId = _currentUser.ApiClientId,
                 OldValueJson = action == AuditAction.Update || action == AuditAction.Delete
-                    ? SerializeOriginalValues(entry)
+                    ? SerializeOriginalValues(entry, entityType, entityId)
                     : null,
                 NewValueJson = action == AuditAction.Create || action == AuditAction.Update
                     ? SerializeCurrentValues(entry)
@@ -123,8 +128,26 @@ public class AuditSaveChangesInterceptor : SaveChangesInterceptor
     private static string SerializeCurrentValues(EntityEntry entry) =>
         JsonSerializer.Serialize(entry.CurrentValues.ToObject());
 
-    private static string SerializeOriginalValues(EntityEntry entry) =>
-        JsonSerializer.Serialize(entry.OriginalValues.ToObject());
+    /// <summary>
+    /// The "before" snapshot — the one place a pre-erasure PII value could otherwise live
+    /// on forever in an append-only table. Any property PendingPiiRedactionTracker was
+    /// told about for this exact entity is blanked out here, before this row is ever
+    /// serialized or persisted; every other property is captured exactly as it always was.
+    /// </summary>
+    private string SerializeOriginalValues(EntityEntry entry, string entityType, string entityId)
+    {
+        var original = entry.OriginalValues.ToObject();
+        foreach (var property in entry.OriginalValues.Properties)
+        {
+            if (property.PropertyInfo is { PropertyType.FullName: "System.String" } propertyInfo
+                && _pendingRedactions.ShouldRedact(entityType, entityId, property.Name))
+            {
+                propertyInfo.SetValue(original, "[REDACTED — DSR Erasure]");
+            }
+        }
+
+        return JsonSerializer.Serialize(original);
+    }
 }
 
 /// <summary>
