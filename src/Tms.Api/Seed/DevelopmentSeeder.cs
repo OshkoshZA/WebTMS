@@ -488,7 +488,9 @@ public static class DevelopmentSeeder
             ("privacy.dsr.manage",
              "Log, fulfill, and reject data subject requests — access, rectification, erasure, portability (§14.3)."),
             ("privacy.retentionpolicy.manage",
-             "Set a Company's per-category retention configuration (§14.2) — separate from privacy.dsr.manage, since one configures the policy and the other acts on individual subjects under it.")
+             "Set a Company's per-category retention configuration (§14.2) — separate from privacy.dsr.manage, since one configures the policy and the other acts on individual subjects under it."),
+            ("integration.webhook.manage",
+             "Register, disable, or replay a partner webhook subscription (§11.2/§11.3) — external integrations, not internal staff workflow, so it sits behind its own function rather than any existing one.")
         };
 
         var adminRole = await roleManager.FindByNameAsync(AdminRoleName);

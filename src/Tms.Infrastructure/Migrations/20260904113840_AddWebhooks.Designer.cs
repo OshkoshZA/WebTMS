@@ -3,6 +3,7 @@ using System;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Metadata;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Tms.Infrastructure;
 
@@ -11,9 +12,11 @@ using Tms.Infrastructure;
 namespace Tms.Infrastructure.Migrations
 {
     [DbContext(typeof(TmsDbContext))]
-    partial class TmsDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260904113840_AddWebhooks")]
+    partial class AddWebhooks
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -38,7 +41,7 @@ namespace Tms.Infrastructure.Migrations
 
                     b.HasKey("Id");
 
-                    b.ToTable("DataProtectionKeys", (string)null);
+                    b.ToTable("DataProtectionKeys");
                 });
 
             modelBuilder.Entity("Microsoft.AspNetCore.Identity.IdentityRoleClaim<System.Guid>", b =>
@@ -187,7 +190,7 @@ namespace Tms.Infrastructure.Migrations
 
                     b.HasKey("Id");
 
-                    b.ToTable("AuditEntries", (string)null);
+                    b.ToTable("AuditEntries");
                 });
 
             modelBuilder.Entity("Tms.Modules.Billing.CreditNote", b =>
@@ -237,7 +240,7 @@ namespace Tms.Infrastructure.Migrations
 
                     b.HasKey("Id");
 
-                    b.ToTable("CreditNotes", (string)null);
+                    b.ToTable("CreditNotes");
                 });
 
             modelBuilder.Entity("Tms.Modules.Billing.CreditNoteLine", b =>
@@ -270,7 +273,7 @@ namespace Tms.Infrastructure.Migrations
 
                     b.HasIndex("CreditNoteId");
 
-                    b.ToTable("CreditNoteLines", (string)null);
+                    b.ToTable("CreditNoteLines");
                 });
 
             modelBuilder.Entity("Tms.Modules.Billing.DebtorsAgingSnapshot", b =>
@@ -320,7 +323,7 @@ namespace Tms.Infrastructure.Migrations
 
                     b.HasKey("Id");
 
-                    b.ToTable("DebtorsAgingSnapshots", (string)null);
+                    b.ToTable("DebtorsAgingSnapshots");
                 });
 
             modelBuilder.Entity("Tms.Modules.Billing.FinancialPeriod", b =>
@@ -369,7 +372,7 @@ namespace Tms.Infrastructure.Migrations
 
                     b.HasIndex("FinancialYearId");
 
-                    b.ToTable("FinancialPeriods", (string)null);
+                    b.ToTable("FinancialPeriods");
                 });
 
             modelBuilder.Entity("Tms.Modules.Billing.FinancialYear", b =>
@@ -399,7 +402,7 @@ namespace Tms.Infrastructure.Migrations
 
                     b.HasKey("Id");
 
-                    b.ToTable("FinancialYears", (string)null);
+                    b.ToTable("FinancialYears");
                 });
 
             modelBuilder.Entity("Tms.Modules.Billing.Invoice", b =>
@@ -453,7 +456,7 @@ namespace Tms.Infrastructure.Migrations
 
                     b.HasKey("Id");
 
-                    b.ToTable("Invoices", (string)null);
+                    b.ToTable("Invoices");
                 });
 
             modelBuilder.Entity("Tms.Modules.Billing.InvoiceLine", b =>
@@ -501,7 +504,7 @@ namespace Tms.Infrastructure.Migrations
                         .IsUnique()
                         .HasDatabaseName("InvoiceLineRateLineSellIndex");
 
-                    b.ToTable("InvoiceLines", (string)null);
+                    b.ToTable("InvoiceLines");
                 });
 
             modelBuilder.Entity("Tms.Modules.Billing.SubcontractorAccrual", b =>
@@ -541,7 +544,7 @@ namespace Tms.Infrastructure.Migrations
                         .IsUnique()
                         .HasDatabaseName("SubcontractorAccrualRateLineIndex");
 
-                    b.ToTable("SubcontractorAccruals", (string)null);
+                    b.ToTable("SubcontractorAccruals");
                 });
 
             modelBuilder.Entity("Tms.Modules.Billing.SubcontractorExpense", b =>
@@ -592,7 +595,7 @@ namespace Tms.Infrastructure.Migrations
 
                     b.HasIndex("SupplierInvoiceId");
 
-                    b.ToTable("SubcontractorExpenses", (string)null);
+                    b.ToTable("SubcontractorExpenses");
                 });
 
             modelBuilder.Entity("Tms.Modules.Billing.SupplierInvoice", b =>
@@ -639,7 +642,7 @@ namespace Tms.Infrastructure.Migrations
                         .IsUnique()
                         .HasDatabaseName("SupplierInvoiceNumberIndex");
 
-                    b.ToTable("SupplierInvoices", (string)null);
+                    b.ToTable("SupplierInvoices");
                 });
 
             modelBuilder.Entity("Tms.Modules.Debrief.Debrief", b =>
@@ -713,7 +716,7 @@ namespace Tms.Infrastructure.Migrations
                         .IsUnique()
                         .HasDatabaseName("DebriefLoadLegIndex");
 
-                    b.ToTable("Debriefs", (string)null);
+                    b.ToTable("Debriefs");
                 });
 
             modelBuilder.Entity("Tms.Modules.Debrief.DebriefExpense", b =>
@@ -758,7 +761,7 @@ namespace Tms.Infrastructure.Migrations
 
                     b.HasIndex("DebriefId");
 
-                    b.ToTable("DebriefExpenses", (string)null);
+                    b.ToTable("DebriefExpenses");
                 });
 
             modelBuilder.Entity("Tms.Modules.Debrief.DebriefIncident", b =>
@@ -790,7 +793,7 @@ namespace Tms.Infrastructure.Migrations
 
                     b.HasIndex("DebriefId");
 
-                    b.ToTable("DebriefIncidents", (string)null);
+                    b.ToTable("DebriefIncidents");
                 });
 
             modelBuilder.Entity("Tms.Modules.Debrief.ExpenseType", b =>
@@ -818,7 +821,7 @@ namespace Tms.Infrastructure.Migrations
 
                     b.HasKey("Id");
 
-                    b.ToTable("ExpenseTypes", (string)null);
+                    b.ToTable("ExpenseTypes");
                 });
 
             modelBuilder.Entity("Tms.Modules.Exceptions.ExceptionRecord", b =>
@@ -872,7 +875,7 @@ namespace Tms.Infrastructure.Migrations
 
                     b.HasIndex("EntityType", "EntityId");
 
-                    b.ToTable("ExceptionRecords", (string)null);
+                    b.ToTable("ExceptionRecords");
                 });
 
             modelBuilder.Entity("Tms.Modules.Fleet.Driver", b =>
@@ -913,7 +916,7 @@ namespace Tms.Infrastructure.Migrations
 
                     b.HasKey("Id");
 
-                    b.ToTable("Drivers", (string)null);
+                    b.ToTable("Drivers");
                 });
 
             modelBuilder.Entity("Tms.Modules.Fleet.Location", b =>
@@ -944,7 +947,7 @@ namespace Tms.Infrastructure.Migrations
 
                     b.HasKey("Id");
 
-                    b.ToTable("Locations", (string)null);
+                    b.ToTable("Locations");
                 });
 
             modelBuilder.Entity("Tms.Modules.Fleet.Vehicle", b =>
@@ -987,7 +990,7 @@ namespace Tms.Infrastructure.Migrations
 
                     b.HasKey("Id");
 
-                    b.ToTable("Vehicles", (string)null);
+                    b.ToTable("Vehicles");
                 });
 
             modelBuilder.Entity("Tms.Modules.Identity.ApiClient", b =>
@@ -1021,7 +1024,7 @@ namespace Tms.Infrastructure.Migrations
 
                     b.HasKey("Id");
 
-                    b.ToTable("ApiClients", (string)null);
+                    b.ToTable("ApiClients");
                 });
 
             modelBuilder.Entity("Tms.Modules.Identity.ApiClientRole", b =>
@@ -1041,7 +1044,7 @@ namespace Tms.Infrastructure.Migrations
 
                     b.HasKey("Id");
 
-                    b.ToTable("ApiClientRoles", (string)null);
+                    b.ToTable("ApiClientRoles");
                 });
 
             modelBuilder.Entity("Tms.Modules.Identity.ApiClientSecret", b =>
@@ -1071,7 +1074,7 @@ namespace Tms.Infrastructure.Migrations
 
                     b.HasKey("Id");
 
-                    b.ToTable("ApiClientSecrets", (string)null);
+                    b.ToTable("ApiClientSecrets");
                 });
 
             modelBuilder.Entity("Tms.Modules.Identity.ApplicationRole", b =>
@@ -1247,7 +1250,7 @@ namespace Tms.Infrastructure.Migrations
 
                     b.HasKey("Id");
 
-                    b.ToTable("Companies", (string)null);
+                    b.ToTable("Companies");
                 });
 
             modelBuilder.Entity("Tms.Modules.Identity.Function", b =>
@@ -1266,7 +1269,7 @@ namespace Tms.Infrastructure.Migrations
 
                     b.HasKey("Id");
 
-                    b.ToTable("Functions", (string)null);
+                    b.ToTable("Functions");
                 });
 
             modelBuilder.Entity("Tms.Modules.Identity.RefreshToken", b =>
@@ -1302,7 +1305,7 @@ namespace Tms.Infrastructure.Migrations
 
                     b.HasKey("Id");
 
-                    b.ToTable("RefreshTokens", (string)null);
+                    b.ToTable("RefreshTokens");
                 });
 
             modelBuilder.Entity("Tms.Modules.Identity.RoleFunction", b =>
@@ -1315,7 +1318,7 @@ namespace Tms.Infrastructure.Migrations
 
                     b.HasKey("RoleId", "FunctionId");
 
-                    b.ToTable("RoleFunctions", (string)null);
+                    b.ToTable("RoleFunctions");
                 });
 
             modelBuilder.Entity("Tms.Modules.Identity.Tenant", b =>
@@ -1340,7 +1343,7 @@ namespace Tms.Infrastructure.Migrations
 
                     b.HasKey("Id");
 
-                    b.ToTable("Tenants", (string)null);
+                    b.ToTable("Tenants");
                 });
 
             modelBuilder.Entity("Tms.Modules.Identity.UserCompanyRole", b =>
@@ -1360,7 +1363,7 @@ namespace Tms.Infrastructure.Migrations
 
                     b.HasKey("Id");
 
-                    b.ToTable("UserCompanyRoles", (string)null);
+                    b.ToTable("UserCompanyRoles");
                 });
 
             modelBuilder.Entity("Tms.Modules.Integration.WebhookDelivery", b =>
@@ -1410,7 +1413,7 @@ namespace Tms.Infrastructure.Migrations
                     b.HasIndex("SubscriptionId")
                         .HasDatabaseName("WebhookDeliverySubscriptionIndex");
 
-                    b.ToTable("WebhookDeliveries", (string)null);
+                    b.ToTable("WebhookDeliveries");
                 });
 
             modelBuilder.Entity("Tms.Modules.Integration.WebhookSubscription", b =>
@@ -1445,7 +1448,7 @@ namespace Tms.Infrastructure.Migrations
                     b.HasIndex("CompanyId", "EventType", "Status")
                         .HasDatabaseName("WebhookSubscriptionIndex");
 
-                    b.ToTable("WebhookSubscriptions", (string)null);
+                    b.ToTable("WebhookSubscriptions");
                 });
 
             modelBuilder.Entity("Tms.Modules.Loads.Client", b =>
@@ -1486,7 +1489,7 @@ namespace Tms.Infrastructure.Migrations
 
                     b.HasKey("Id");
 
-                    b.ToTable("Clients", (string)null);
+                    b.ToTable("Clients");
                 });
 
             modelBuilder.Entity("Tms.Modules.Loads.ClientCurrency", b =>
@@ -1517,7 +1520,7 @@ namespace Tms.Infrastructure.Migrations
                         .IsUnique()
                         .HasDatabaseName("ClientCurrencyIndex");
 
-                    b.ToTable("ClientCurrencies", (string)null);
+                    b.ToTable("ClientCurrencies");
                 });
 
             modelBuilder.Entity("Tms.Modules.Loads.Commodity", b =>
@@ -1551,7 +1554,7 @@ namespace Tms.Infrastructure.Migrations
 
                     b.HasKey("Id");
 
-                    b.ToTable("Commodities", (string)null);
+                    b.ToTable("Commodities");
                 });
 
             modelBuilder.Entity("Tms.Modules.Loads.CommodityLine", b =>
@@ -1586,7 +1589,7 @@ namespace Tms.Infrastructure.Migrations
 
                     b.HasIndex("LoadLegId");
 
-                    b.ToTable("CommodityLines", (string)null);
+                    b.ToTable("CommodityLines");
                 });
 
             modelBuilder.Entity("Tms.Modules.Loads.CostCentre", b =>
@@ -1617,7 +1620,7 @@ namespace Tms.Infrastructure.Migrations
 
                     b.HasKey("Id");
 
-                    b.ToTable("CostCentres", (string)null);
+                    b.ToTable("CostCentres");
                 });
 
             modelBuilder.Entity("Tms.Modules.Loads.Load", b =>
@@ -1659,7 +1662,7 @@ namespace Tms.Infrastructure.Migrations
 
                     b.HasKey("Id");
 
-                    b.ToTable("Loads", (string)null);
+                    b.ToTable("Loads");
                 });
 
             modelBuilder.Entity("Tms.Modules.Loads.LoadConfirmation", b =>
@@ -1702,7 +1705,7 @@ namespace Tms.Infrastructure.Migrations
                         .IsUnique()
                         .HasDatabaseName("LoadConfirmationLegIndex");
 
-                    b.ToTable("LoadConfirmations", (string)null);
+                    b.ToTable("LoadConfirmations");
                 });
 
             modelBuilder.Entity("Tms.Modules.Loads.LoadLeg", b =>
@@ -1751,7 +1754,7 @@ namespace Tms.Infrastructure.Migrations
 
                     b.HasIndex("LoadId");
 
-                    b.ToTable("LoadLegs", (string)null);
+                    b.ToTable("LoadLegs");
                 });
 
             modelBuilder.Entity("Tms.Modules.Loads.LoadStatusHistory", b =>
@@ -1786,7 +1789,7 @@ namespace Tms.Infrastructure.Migrations
 
                     b.HasKey("Id");
 
-                    b.ToTable("LoadStatusHistories", (string)null);
+                    b.ToTable("LoadStatusHistories");
                 });
 
             modelBuilder.Entity("Tms.Modules.Loads.LoadType", b =>
@@ -1805,7 +1808,7 @@ namespace Tms.Infrastructure.Migrations
 
                     b.HasKey("Id");
 
-                    b.ToTable("LoadTypes", (string)null);
+                    b.ToTable("LoadTypes");
                 });
 
             modelBuilder.Entity("Tms.Modules.Loads.Subcontractor", b =>
@@ -1845,7 +1848,7 @@ namespace Tms.Infrastructure.Migrations
 
                     b.HasKey("Id");
 
-                    b.ToTable("Subcontractors", (string)null);
+                    b.ToTable("Subcontractors");
                 });
 
             modelBuilder.Entity("Tms.Modules.Loads.SubcontractorCurrency", b =>
@@ -1872,7 +1875,7 @@ namespace Tms.Infrastructure.Migrations
                         .IsUnique()
                         .HasDatabaseName("SubcontractorCurrencyIndex");
 
-                    b.ToTable("SubcontractorCurrencies", (string)null);
+                    b.ToTable("SubcontractorCurrencies");
                 });
 
             modelBuilder.Entity("Tms.Modules.Privacy.DataSubjectRequest", b =>
@@ -1913,7 +1916,7 @@ namespace Tms.Infrastructure.Migrations
 
                     b.HasKey("Id");
 
-                    b.ToTable("DataSubjectRequests", (string)null);
+                    b.ToTable("DataSubjectRequests");
                 });
 
             modelBuilder.Entity("Tms.Modules.Privacy.RetentionPolicy", b =>
@@ -1947,7 +1950,7 @@ namespace Tms.Infrastructure.Migrations
                         .IsUnique()
                         .HasDatabaseName("RetentionPolicyIndex");
 
-                    b.ToTable("RetentionPolicies", (string)null);
+                    b.ToTable("RetentionPolicies");
                 });
 
             modelBuilder.Entity("Tms.Modules.Rating.ExchangeRate", b =>
@@ -1981,7 +1984,7 @@ namespace Tms.Infrastructure.Migrations
                         .IsUnique()
                         .HasDatabaseName("ExchangeRateIndex");
 
-                    b.ToTable("ExchangeRates", (string)null);
+                    b.ToTable("ExchangeRates");
                 });
 
             modelBuilder.Entity("Tms.Modules.Rating.RateLine", b =>
@@ -2025,7 +2028,7 @@ namespace Tms.Infrastructure.Migrations
 
                     b.HasKey("Id");
 
-                    b.ToTable("RateLines", (string)null);
+                    b.ToTable("RateLines");
                 });
 
             modelBuilder.Entity("Tms.Shared.Country", b =>
@@ -2044,7 +2047,7 @@ namespace Tms.Infrastructure.Migrations
 
                     b.HasKey("Id");
 
-                    b.ToTable("Countries", (string)null);
+                    b.ToTable("Countries");
                 });
 
             modelBuilder.Entity("Tms.Shared.Currency", b =>
@@ -2067,7 +2070,7 @@ namespace Tms.Infrastructure.Migrations
 
                     b.HasKey("Id");
 
-                    b.ToTable("Currencies", (string)null);
+                    b.ToTable("Currencies");
                 });
 
             modelBuilder.Entity("Tms.Shared.UnitOfMeasure", b =>
@@ -2086,7 +2089,7 @@ namespace Tms.Infrastructure.Migrations
 
                     b.HasKey("Id");
 
-                    b.ToTable("UnitsOfMeasure", (string)null);
+                    b.ToTable("UnitsOfMeasure");
                 });
 
             modelBuilder.Entity("Microsoft.AspNetCore.Identity.IdentityRoleClaim<System.Guid>", b =>

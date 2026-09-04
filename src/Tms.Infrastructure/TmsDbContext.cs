@@ -10,6 +10,7 @@ using Tms.Modules.Debrief;
 using Tms.Modules.Exceptions;
 using Tms.Modules.Fleet;
 using Tms.Modules.Identity;
+using Tms.Modules.Integration;
 using Tms.Modules.Loads;
 using Tms.Modules.Privacy;
 using Tms.Modules.Rating;
@@ -32,6 +33,7 @@ public class TmsDbContext : IdentityDbContext<ApplicationUser, ApplicationRole, 
 {
     private readonly ITenantContext _tenantContext;
     private readonly IDataProtector _bankingProtector;
+    private readonly IDataProtector _webhookSecretProtector;
 
     public TmsDbContext(DbContextOptions<TmsDbContext> options, ITenantContext tenantContext, IDataProtectionProvider dataProtectionProvider)
         : base(options)
@@ -43,6 +45,12 @@ public class TmsDbContext : IdentityDbContext<ApplicationUser, ApplicationRole, 
         // ring, so a future second protected field (or a deliberate re-key to "v2")
         // can never cross-contaminate with this one.
         _bankingProtector = dataProtectionProvider.CreateProtector("Tms.BankingDetails.v1");
+
+        // Same reasoning, its own independent purpose (§14.5's per-purpose key
+        // derivation) — unlike ApiClientSecret's hash-only model, a webhook's Secret
+        // must be recoverable in plaintext to HMAC-sign every future delivery, so it's
+        // encrypted at rest rather than hashed.
+        _webhookSecretProtector = dataProtectionProvider.CreateProtector("Tms.WebhookSecret.v1");
     }
 
     /// <summary>
@@ -130,6 +138,10 @@ public class TmsDbContext : IdentityDbContext<ApplicationUser, ApplicationRole, 
     // Exceptions (§16.1) — the shared cross-module attention mechanism
     public DbSet<ExceptionRecord> ExceptionRecords => Set<ExceptionRecord>();
 
+    // Integration (§11.3) — partner webhook subscriptions and their delivery attempts
+    public DbSet<WebhookSubscription> WebhookSubscriptions => Set<WebhookSubscription>();
+    public DbSet<WebhookDelivery> WebhookDeliveries => Set<WebhookDelivery>();
+
     // Audit (§12) — append-only; see AuditSaveChangesInterceptor
     public DbSet<AuditEntry> AuditEntries => Set<AuditEntry>();
 
@@ -154,6 +166,11 @@ public class TmsDbContext : IdentityDbContext<ApplicationUser, ApplicationRole, 
 
         modelBuilder.Entity<Company>().Property(c => c.BankingDetails).HasConversion(bankingDetailsConverter);
         modelBuilder.Entity<Subcontractor>().Property(s => s.BankingDetails).HasConversion(nullableBankingDetailsConverter);
+
+        var webhookSecretConverter = new ValueConverter<string, string>(
+            plaintext => _webhookSecretProtector.Protect(plaintext),
+            ciphertext => _webhookSecretProtector.Unprotect(ciphertext));
+        modelBuilder.Entity<WebhookSubscription>().Property(s => s.Secret).HasConversion(webhookSecretConverter);
 
         modelBuilder.Entity<Client>().Property(c => c.CreditLimit).HasPrecision(18, 2);
         modelBuilder.Entity<CommodityLine>().Property(c => c.Quantity).HasPrecision(18, 3);
@@ -190,6 +207,16 @@ public class TmsDbContext : IdentityDbContext<ApplicationUser, ApplicationRole, 
             .HasIndex(p => new { p.CompanyId, p.DataCategory })
             .IsUnique()
             .HasDatabaseName("RetentionPolicyIndex");
+
+        // WebhookPublisher.QueueAsync's whole job is "find this Company's Active
+        // subscriptions for this EventType" (§11.3) — not unique, a Company can register
+        // more than one partner callback for the same event.
+        modelBuilder.Entity<WebhookSubscription>()
+            .HasIndex(s => new { s.CompanyId, s.EventType, s.Status })
+            .HasDatabaseName("WebhookSubscriptionIndex");
+        modelBuilder.Entity<WebhookDelivery>()
+            .HasIndex(d => d.SubscriptionId)
+            .HasDatabaseName("WebhookDeliverySubscriptionIndex");
 
         modelBuilder.Entity<Load>()
             .HasMany(l => l.Legs)

@@ -7,6 +7,7 @@ using Microsoft.EntityFrameworkCore.Storage;
 using Tms.Api.Services;
 using Tms.Infrastructure;
 using Tms.Modules.Billing;
+using Tms.Modules.Integration;
 using Tms.Shared;
 
 namespace Tms.Api.Controllers;
@@ -42,14 +43,19 @@ public class CreditNotesController : ControllerBase
     private readonly ITenantContext _tenantContext;
     private readonly CreditExposureService _creditExposure;
     private readonly IAuthorizationService _authorizationService;
+    private readonly WebhookPublisher _webhookPublisher;
+    private readonly WebhookDeliveryService _webhookDelivery;
 
     public CreditNotesController(
-        TmsDbContext db, ITenantContext tenantContext, CreditExposureService creditExposure, IAuthorizationService authorizationService)
+        TmsDbContext db, ITenantContext tenantContext, CreditExposureService creditExposure, IAuthorizationService authorizationService,
+        WebhookPublisher webhookPublisher, WebhookDeliveryService webhookDelivery)
     {
         _db = db;
         _tenantContext = tenantContext;
         _creditExposure = creditExposure;
         _authorizationService = authorizationService;
+        _webhookPublisher = webhookPublisher;
+        _webhookDelivery = webhookDelivery;
     }
 
     /// <summary>Also the Customer Portal's own credit note list (§13.1, §13.2) — a portal caller is pinned to their own Client's credit notes regardless of what clientId they pass.</summary>
@@ -236,7 +242,12 @@ public class CreditNotesController : ControllerBase
         creditNote.IssueDate = request.IssueDate ?? DateOnly.FromDateTime(DateTime.UtcNow);
         creditNote.Status = CreditNoteStatus.Issued;
 
+        var deliveryIds = await _webhookPublisher.QueueAsync(
+            _tenantContext.TenantId.Value, _tenantContext.CompanyId.Value,
+            WebhookEventTypes.CreditNoteIssued, nameof(CreditNote), creditNote.Id, ct);
+
         await _db.SaveChangesAsync(ct);
+        await _webhookDelivery.DeliverAsync(deliveryIds, ct);
         return NoContent();
     }
 

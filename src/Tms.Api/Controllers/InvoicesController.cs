@@ -2,8 +2,10 @@ using Asp.Versioning;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using Tms.Api.Services;
 using Tms.Infrastructure;
 using Tms.Modules.Billing;
+using Tms.Modules.Integration;
 using Tms.Modules.Loads;
 using Tms.Modules.Rating;
 using Tms.Shared;
@@ -38,12 +40,18 @@ public class InvoicesController : ControllerBase
     private readonly TmsDbContext _db;
     private readonly ITenantContext _tenantContext;
     private readonly IAuthorizationService _authorizationService;
+    private readonly WebhookPublisher _webhookPublisher;
+    private readonly WebhookDeliveryService _webhookDelivery;
 
-    public InvoicesController(TmsDbContext db, ITenantContext tenantContext, IAuthorizationService authorizationService)
+    public InvoicesController(
+        TmsDbContext db, ITenantContext tenantContext, IAuthorizationService authorizationService,
+        WebhookPublisher webhookPublisher, WebhookDeliveryService webhookDelivery)
     {
         _db = db;
         _tenantContext = tenantContext;
         _authorizationService = authorizationService;
+        _webhookPublisher = webhookPublisher;
+        _webhookDelivery = webhookDelivery;
     }
 
     /// <summary>Also the Customer Portal's own invoice list (§13.1, §13.2) — a portal caller is pinned to their own Client's invoices regardless of what clientId they pass.</summary>
@@ -187,7 +195,12 @@ public class InvoicesController : ControllerBase
         invoice.DueDate = invoice.IssueDate.AddDays(client.PaymentTermsDays);
         invoice.Status = InvoiceStatus.Issued;
 
+        var deliveryIds = await _webhookPublisher.QueueAsync(
+            _tenantContext.TenantId.Value, _tenantContext.CompanyId.Value,
+            WebhookEventTypes.InvoiceIssued, nameof(Invoice), invoice.Id, ct);
+
         await _db.SaveChangesAsync(ct);
+        await _webhookDelivery.DeliverAsync(deliveryIds, ct);
         return NoContent();
     }
 

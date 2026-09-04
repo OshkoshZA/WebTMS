@@ -6,6 +6,7 @@ using Tms.Api.Services;
 using Tms.Infrastructure;
 using Tms.Modules.Billing;
 using Tms.Modules.Exceptions;
+using Tms.Modules.Integration;
 using Tms.Modules.Loads;
 using Tms.Shared;
 
@@ -44,14 +45,19 @@ public class SupplierInvoicesController : ControllerBase
     private readonly ITenantContext _tenantContext;
     private readonly ExceptionService _exceptions;
     private readonly IAuthorizationService _authorizationService;
+    private readonly WebhookPublisher _webhookPublisher;
+    private readonly WebhookDeliveryService _webhookDelivery;
 
     public SupplierInvoicesController(
-        TmsDbContext db, ITenantContext tenantContext, ExceptionService exceptions, IAuthorizationService authorizationService)
+        TmsDbContext db, ITenantContext tenantContext, ExceptionService exceptions, IAuthorizationService authorizationService,
+        WebhookPublisher webhookPublisher, WebhookDeliveryService webhookDelivery)
     {
         _db = db;
         _tenantContext = tenantContext;
         _exceptions = exceptions;
         _authorizationService = authorizationService;
+        _webhookPublisher = webhookPublisher;
+        _webhookDelivery = webhookDelivery;
     }
 
     /// <summary>Also the Supplier Portal's own "when will I get paid" view (§13.1, §13.3) — a portal caller is pinned to their own Subcontractor's invoices regardless of what subcontractorId they pass.</summary>
@@ -243,6 +249,7 @@ public class SupplierInvoicesController : ControllerBase
                 $"Invoice {invoice.SupplierInvoiceNumber}: invoiced {invoice.Amount:N2} vs. accrued {totalEstimated:N2} — variance {varianceAmount:N2}.");
         }
 
+        var deliveryIds = new List<Guid>();
         for (var i = 0; i < accruals.Count; i++)
         {
             var accrual = accruals[i];
@@ -256,7 +263,7 @@ public class SupplierInvoicesController : ControllerBase
             // statements against nonexistent SubcontractorExpense rows instead of
             // INSERTs (a real 0-rows-affected DbUpdateConcurrencyException, caught live
             // testing this). Adding straight to the DbSet forces the correct Added state.
-            _db.Set<SubcontractorExpense>().Add(new SubcontractorExpense
+            var expense = new SubcontractorExpense
             {
                 TenantId = _tenantContext.TenantId.Value,
                 CompanyId = _tenantContext.CompanyId.Value,
@@ -268,7 +275,12 @@ public class SupplierInvoicesController : ControllerBase
                 FinancialPeriodId = openPeriod.Id,
                 Amount = expenseAmount,
                 Status = SubcontractorExpenseStatus.AvailableToExport
-            });
+            };
+            _db.Set<SubcontractorExpense>().Add(expense);
+
+            deliveryIds.AddRange(await _webhookPublisher.QueueAsync(
+                _tenantContext.TenantId.Value, _tenantContext.CompanyId.Value,
+                WebhookEventTypes.SubcontractorExpenseAvailableForExport, nameof(SubcontractorExpense), expense.Id, ct));
         }
 
         try
@@ -285,6 +297,8 @@ public class SupplierInvoicesController : ControllerBase
             await transaction.RollbackAsync(ct);
             return Conflict("One or more of these accruals were already matched by a concurrent request.");
         }
+
+        await _webhookDelivery.DeliverAsync(deliveryIds, ct);
 
         // Reload so the response reflects the SubcontractorExpense rows just inserted —
         // invoice.Expenses (populated only by the collection-navigation Add we removed
