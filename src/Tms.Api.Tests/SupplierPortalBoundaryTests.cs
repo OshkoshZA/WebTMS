@@ -148,6 +148,34 @@ public class SupplierPortalBoundaryTests
         Assert.Equal(HttpStatusCode.Forbidden, asClientResponse.StatusCode);
     }
 
+    /// <summary>
+    /// Regression test for the gap found while planning the debrief-expense form:
+    /// LegsController.SubmitDebrief requires a valid ExpenseTypeId for any expense claim,
+    /// but ExpenseTypesController used to Forbid EVERY portal contact outright, leaving a
+    /// Subcontractor Portal contact with no way to discover one at all. Fixed to open
+    /// List/Get to a Subcontractor Portal contact specifically; a Client contact still
+    /// gets nothing here since no debrief/expense action exists on that side.
+    /// </summary>
+    [Fact]
+    public async Task ExpenseTypes_list_and_get_are_open_to_subcontractor_portal_but_still_reject_client_contact()
+    {
+        using var mine = _fixture.CreateAuthenticatedClient(_fixture.SubcontractorToken);
+        var listResponse = await mine.GetAsync("/api/v1/expense-types");
+        Assert.Equal(HttpStatusCode.OK, listResponse.StatusCode);
+        var types = await listResponse.Content.ReadFromJsonAsync<List<JsonElementLike>>();
+        Assert.NotEmpty(types!);
+
+        var getResponse = await mine.GetAsync($"/api/v1/expense-types/{types![0].Id}");
+        Assert.Equal(HttpStatusCode.OK, getResponse.StatusCode);
+
+        using var wrongType = _fixture.CreateAuthenticatedClient(_fixture.ClientToken);
+        var asClientListResponse = await wrongType.GetAsync("/api/v1/expense-types");
+        Assert.Equal(HttpStatusCode.Forbidden, asClientListResponse.StatusCode);
+
+        var asClientGetResponse = await wrongType.GetAsync($"/api/v1/expense-types/{types[0].Id}");
+        Assert.Equal(HttpStatusCode.Forbidden, asClientGetResponse.StatusCode);
+    }
+
     [Fact]
     public async Task SubcontractorContacts_list_rejects_other_subcontractor_and_client_contact()
     {

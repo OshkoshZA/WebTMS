@@ -33,9 +33,17 @@ public class MasterDataAndAdminBoundaryTests
         new object[] { "/api/v1/commodities" },
         new object[] { "/api/v1/cost-centres" },
         new object[] { "/api/v1/drivers" },
-        new object[] { "/api/v1/expense-types" },
         new object[] { "/api/v1/locations" },
         new object[] { "/api/v1/vehicles" },
+    };
+
+    // Blocked for a Client Portal contact but NOT for a Subcontractor Portal contact —
+    // ExpenseTypesController.List/Get was opened to the latter (see
+    // SupplierPortalBoundaryTests.ExpenseTypes_list_and_get_are_open_to_subcontractor_portal_but_still_reject_client_contact)
+    // so it doesn't belong in BlockedForAnyPortalCallerRoutes above any more.
+    public static IEnumerable<object[]> BlockedForClientContactOnlyRoutes => new[]
+    {
+        new object[] { "/api/v1/expense-types" },
     };
 
     [Theory]
@@ -49,6 +57,7 @@ public class MasterDataAndAdminBoundaryTests
 
     [Theory]
     [MemberData(nameof(BlockedForAnyPortalCallerRoutes))]
+    [MemberData(nameof(BlockedForClientContactOnlyRoutes))]
     public async Task Route_rejects_client_contact(string route)
     {
         using var client = _fixture.CreateAuthenticatedClient(_fixture.ClientToken);

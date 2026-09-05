@@ -27,11 +27,17 @@ public class ExpenseTypesController : ControllerBase
         _tenantContext = tenantContext;
     }
 
-    /// <summary>Never part of either portal's documented scope, so any portal contact is Forbidden outright — matching every other master-data controller's own equivalent fix.</summary>
+    /// <summary>
+    /// Open to a Supplier Portal contact, unlike every other master-data controller's
+    /// own "any portal contact is Forbidden outright" convention — LegsController.SubmitDebrief
+    /// requires a valid ExpenseTypeId for any expense claim, and a portal contact had no
+    /// way to discover one at all until this changed; a Customer Portal contact still
+    /// gets nothing from this (no debrief/expense action exists on that side).
+    /// </summary>
     [HttpGet]
     public async Task<ActionResult<IEnumerable<ExpenseType>>> List(CancellationToken ct)
     {
-        if (_tenantContext.SubcontractorId is not null || _tenantContext.ClientId is not null) return Forbid();
+        if (_tenantContext.ClientId is not null) return Forbid();
 
         return Ok(await _db.ExpenseTypes.OrderBy(t => t.Code).ToListAsync(ct));
     }
@@ -39,7 +45,7 @@ public class ExpenseTypesController : ControllerBase
     [HttpGet("{id:guid}")]
     public async Task<ActionResult<ExpenseType>> Get(Guid id, CancellationToken ct)
     {
-        if (_tenantContext.SubcontractorId is not null || _tenantContext.ClientId is not null) return Forbid();
+        if (_tenantContext.ClientId is not null) return Forbid();
 
         var type = await _db.ExpenseTypes.FirstOrDefaultAsync(t => t.Id == id, ct);
         return type is null ? NotFound() : Ok(type);
