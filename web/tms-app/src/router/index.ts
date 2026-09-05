@@ -21,6 +21,9 @@ export const router = createRouter({
     { path: '/subcontractors', name: 'subcontractors-list', component: () => import('../views/SubcontractorsListView.vue') },
     { path: '/subcontractors/new', name: 'subcontractors-new', component: () => import('../views/SubcontractorCreateView.vue') },
     { path: '/subcontractors/:id', name: 'subcontractors-detail', component: () => import('../views/SubcontractorDetailView.vue'), props: true },
+    { path: '/cost-centres', name: 'cost-centres-list', component: () => import('../views/CostCentresListView.vue') },
+    { path: '/cost-centres/new', name: 'cost-centres-new', component: () => import('../views/CostCentreCreateView.vue') },
+    { path: '/cost-centres/:id', name: 'cost-centres-detail', component: () => import('../views/CostCentreDetailView.vue'), props: true },
     { path: '/:pathMatch(.*)*', redirect: '/loads' },
   ],
 })
