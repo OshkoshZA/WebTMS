@@ -66,6 +66,8 @@ public class CreditNotesController : ControllerBase
         // Forbidden — the bug an earlier version of this check had would have returned
         // every client's credit notes to a subcontractor contact.
         if (_tenantContext.SubcontractorId is not null) return Forbid();
+
+        var isPortalCaller = _tenantContext.ClientId is not null;
         if (_tenantContext.ClientId is Guid ownClientId)
         {
             var authResult = await _authorizationService.AuthorizeAsync(User, "portal.client.viewinvoices");
@@ -75,6 +77,9 @@ public class CreditNotesController : ControllerBase
 
         var query = _db.Set<CreditNote>().Include(cn => cn.Lines).AsQueryable();
         if (clientId is Guid c) query = query.Where(cn => cn.ClientId == c);
+        // Same reasoning as InvoicesController.List — a Draft credit note is still an
+        // internal working document, so a portal caller never sees it; staff do.
+        if (isPortalCaller) query = query.Where(cn => cn.Status != CreditNoteStatus.Draft);
 
         var creditNotes = await query.OrderByDescending(cn => cn.IssueDate).ToListAsync(ct);
         return Ok(creditNotes.Select(ToResponse));
@@ -85,6 +90,7 @@ public class CreditNotesController : ControllerBase
     {
         var creditNote = await _db.Set<CreditNote>().Include(cn => cn.Lines).FirstOrDefaultAsync(cn => cn.Id == id, ct);
         if (creditNote is not null && !_tenantContext.CanAccessClient(creditNote.ClientId)) return Forbid();
+        if (creditNote is not null && _tenantContext.ClientId is not null && creditNote.Status == CreditNoteStatus.Draft) return Forbid();
 
         return creditNote is null ? NotFound() : Ok(ToResponse(creditNote));
     }

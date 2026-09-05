@@ -237,11 +237,12 @@ public class ClientsController : ControllerBase
         var portalCheck = await CheckPortalClientAccessAsync(id, "portal.client.viewinvoices");
         if (portalCheck is not null) return portalCheck;
 
-        var invoices = await _db.Invoices
-            .Include(i => i.Lines)
-            .Where(i => i.ClientId == id)
-            .OrderByDescending(i => i.IssueDate)
-            .ToListAsync(ct);
+        var query = _db.Invoices.Include(i => i.Lines).Where(i => i.ClientId == id);
+        // A Draft invoice is still an internal working document — a portal caller
+        // never sees it, staff still see every status via this same endpoint.
+        if (_tenantContext.ClientId is not null) query = query.Where(i => i.Status != InvoiceStatus.Draft);
+
+        var invoices = await query.OrderByDescending(i => i.IssueDate).ToListAsync(ct);
 
         return Ok(invoices.Select(InvoicesController.ToResponse));
     }
@@ -255,11 +256,10 @@ public class ClientsController : ControllerBase
         var portalCheck = await CheckPortalClientAccessAsync(id, "portal.client.viewinvoices");
         if (portalCheck is not null) return portalCheck;
 
-        var creditNotes = await _db.Set<CreditNote>()
-            .Include(cn => cn.Lines)
-            .Where(cn => cn.ClientId == id)
-            .OrderByDescending(cn => cn.IssueDate)
-            .ToListAsync(ct);
+        var query = _db.Set<CreditNote>().Include(cn => cn.Lines).Where(cn => cn.ClientId == id);
+        if (_tenantContext.ClientId is not null) query = query.Where(cn => cn.Status != CreditNoteStatus.Draft);
+
+        var creditNotes = await query.OrderByDescending(cn => cn.IssueDate).ToListAsync(ct);
 
         return Ok(creditNotes.Select(CreditNotesController.ToResponse));
     }

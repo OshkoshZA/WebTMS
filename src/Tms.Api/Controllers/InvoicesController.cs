@@ -62,6 +62,8 @@ public class InvoicesController : ControllerBase
         // Forbidden — the bug an earlier version of this check had would have returned
         // every client's invoices to a subcontractor contact.
         if (_tenantContext.SubcontractorId is not null) return Forbid();
+
+        var isPortalCaller = _tenantContext.ClientId is not null;
         if (_tenantContext.ClientId is Guid ownClientId)
         {
             var authResult = await _authorizationService.AuthorizeAsync(User, "portal.client.viewinvoices");
@@ -71,6 +73,10 @@ public class InvoicesController : ControllerBase
 
         var query = _db.Invoices.Include(i => i.Lines).AsQueryable();
         if (clientId is Guid c) query = query.Where(i => i.ClientId == c);
+        // A Draft invoice is still an internal working document — nothing has been
+        // issued to the client yet, so a portal caller never sees it; staff still see
+        // every status, including Draft, since they're the ones who'd act on it.
+        if (isPortalCaller) query = query.Where(i => i.Status != InvoiceStatus.Draft);
 
         var invoices = await query.OrderByDescending(i => i.IssueDate).ToListAsync(ct);
         return Ok(invoices.Select(ToResponse));
@@ -81,6 +87,9 @@ public class InvoicesController : ControllerBase
     {
         var invoice = await _db.Invoices.Include(i => i.Lines).FirstOrDefaultAsync(i => i.Id == id, ct);
         if (invoice is not null && !_tenantContext.CanAccessClient(invoice.ClientId)) return Forbid();
+        // Same Draft restriction as List — a portal caller who already had this id
+        // (e.g. from an earlier issued state) still can't reach it while it's Draft.
+        if (invoice is not null && _tenantContext.ClientId is not null && invoice.Status == InvoiceStatus.Draft) return Forbid();
 
         return invoice is null ? NotFound() : Ok(ToResponse(invoice));
     }

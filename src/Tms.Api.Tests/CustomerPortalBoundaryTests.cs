@@ -148,6 +148,66 @@ public class CustomerPortalBoundaryTests
         Assert.Equal(HttpStatusCode.Forbidden, asSubResponse.StatusCode);
     }
 
+    /// <summary>Regression test for the fix closing a real gap this pass found: a portal caller's invoice list previously had no status filter at all, so a Draft invoice — an internal working document nobody has actually issued yet — was fully visible to the client it belongs to.</summary>
+    [Fact]
+    public async Task Draft_invoice_is_hidden_from_the_portal_until_issued()
+    {
+        var invoiceId = await _fixture.GenerateDraftInvoiceForOwnClientAsync($"PORTAL-DRAFT-{Guid.NewGuid():N}");
+
+        using var mine = _fixture.CreateAuthenticatedClient(_fixture.ClientToken);
+
+        var topLevelBefore = await mine.GetFromJsonAsync<List<IdLike>>("/api/v1/invoices");
+        Assert.DoesNotContain(topLevelBefore!, i => i.Id == invoiceId);
+
+        var clientScopedBefore = await mine.GetFromJsonAsync<List<IdLike>>($"/api/v1/clients/{_fixture.ClientId}/invoices");
+        Assert.DoesNotContain(clientScopedBefore!, i => i.Id == invoiceId);
+
+        var getBefore = await mine.GetAsync($"/api/v1/invoices/{invoiceId}");
+        Assert.Equal(HttpStatusCode.Forbidden, getBefore.StatusCode);
+
+        (await _fixture.StaffClient.PostAsJsonAsync($"/api/v1/invoices/{invoiceId}/issue", new { })).EnsureSuccessStatusCode();
+
+        var topLevelAfter = await mine.GetFromJsonAsync<List<IdLike>>("/api/v1/invoices");
+        Assert.Contains(topLevelAfter!, i => i.Id == invoiceId);
+
+        var clientScopedAfter = await mine.GetFromJsonAsync<List<IdLike>>($"/api/v1/clients/{_fixture.ClientId}/invoices");
+        Assert.Contains(clientScopedAfter!, i => i.Id == invoiceId);
+
+        var getAfter = await mine.GetAsync($"/api/v1/invoices/{invoiceId}");
+        Assert.Equal(HttpStatusCode.OK, getAfter.StatusCode);
+    }
+
+    /// <summary>Same fix, the credit-note side — a standalone Draft note needs no load/debrief setup, so this covers CreditNotesController's own equivalent filter directly.</summary>
+    [Fact]
+    public async Task Draft_credit_note_is_hidden_from_the_portal_until_issued()
+    {
+        var createResponse = await _fixture.StaffClient.PostAsJsonAsync("/api/v1/credit-notes", new
+        {
+            clientId = _fixture.ClientId,
+            reason = "Portal Draft-visibility regression test",
+            lines = new[] { new { description = "Goodwill adjustment", amount = 50m } }
+        });
+        createResponse.EnsureSuccessStatusCode();
+        var creditNoteId = (await createResponse.Content.ReadFromJsonAsync<IdLike>())!.Id;
+
+        using var mine = _fixture.CreateAuthenticatedClient(_fixture.ClientToken);
+
+        var topLevelBefore = await mine.GetFromJsonAsync<List<IdLike>>("/api/v1/credit-notes");
+        Assert.DoesNotContain(topLevelBefore!, c => c.Id == creditNoteId);
+
+        var clientScopedBefore = await mine.GetFromJsonAsync<List<IdLike>>($"/api/v1/clients/{_fixture.ClientId}/credit-notes");
+        Assert.DoesNotContain(clientScopedBefore!, c => c.Id == creditNoteId);
+
+        (await _fixture.StaffClient.PostAsJsonAsync($"/api/v1/credit-notes/{creditNoteId}/issue", new { })).EnsureSuccessStatusCode();
+
+        var topLevelAfter = await mine.GetFromJsonAsync<List<IdLike>>("/api/v1/credit-notes");
+        Assert.Contains(topLevelAfter!, c => c.Id == creditNoteId);
+
+        var clientScopedAfter = await mine.GetFromJsonAsync<List<IdLike>>($"/api/v1/clients/{_fixture.ClientId}/credit-notes");
+        Assert.Contains(clientScopedAfter!, c => c.Id == creditNoteId);
+    }
+
     private sealed record LoadLike(Guid Id);
     private sealed record ClientOwnedLike(Guid Id, Guid ClientId);
+    private sealed record IdLike(Guid Id);
 }

@@ -212,6 +212,48 @@ public class PortalTestFixture : IAsyncLifetime
         return (leg.Id, loadId, accrual.Id);
     }
 
+    /// <summary>
+    /// Books a load for the fixture's own ClientId, walks one own-fleet leg through to
+    /// PodReceived (start -&gt; deliver -&gt; debrief), and generates the resulting Draft
+    /// invoice — everything CustomerPortalBoundaryTests needs to verify a portal
+    /// caller never sees a Draft invoice, only an Issued one (InvoicesController.List's
+    /// own portal-only status filter).
+    /// </summary>
+    public async Task<Guid> GenerateDraftInvoiceForOwnClientAsync(string referenceNo)
+    {
+        var loadId = await CreateLoadAsync(ClientId, referenceNo);
+
+        var legResponse = await StaffClient.PostAsJsonAsync($"/api/v1/loads/{loadId}/legs", new
+        {
+            sequenceNo = 1,
+            originLocationId = Guid.Parse(OriginLocationId),
+            destinationLocationId = Guid.Parse(DestinationLocationId),
+            executionType = 0, // OwnFleet
+            costCentreId = Guid.Parse(CostCentreId),
+            vehicleId = Guid.Parse("bbbbbbbb-0000-0000-0000-000000000001"),
+            driverId = Guid.Parse("a05273b3-36b7-454a-9029-7b09a3068db0")
+        });
+        legResponse.EnsureSuccessStatusCode();
+        var legId = (await legResponse.Content.ReadFromJsonAsync<IdDto>())!.Id;
+
+        (await StaffClient.PostAsJsonAsync($"/api/v1/loads/{loadId}/legs/{legId}/commodity-lines", new
+        {
+            commodityId = Guid.Parse(CommodityId),
+            quantity = 1,
+            unitOfMeasureId = Guid.Parse(UnitOfMeasureId),
+            sellRatePerUnit = 500
+        })).EnsureSuccessStatusCode();
+
+        (await StaffClient.PostAsync($"/api/v1/loads/{loadId}/legs/{legId}/start", null)).EnsureSuccessStatusCode();
+        (await StaffClient.PostAsync($"/api/v1/loads/{loadId}/legs/{legId}/deliver", null)).EnsureSuccessStatusCode();
+        (await StaffClient.PostAsJsonAsync($"/api/v1/legs/{legId}/debrief",
+            new { podReceived = true, podImageUrl = "https://example.com/pod.jpg" })).EnsureSuccessStatusCode();
+
+        var invoiceResponse = await StaffClient.PostAsJsonAsync("/api/v1/invoices/generate", new { clientId = ClientId });
+        invoiceResponse.EnsureSuccessStatusCode();
+        return (await invoiceResponse.Content.ReadFromJsonAsync<IdDto>())!.Id;
+    }
+
     private async Task CreateSubcontractorContactAsync(Guid subcontractorId, string email, Guid roleId)
     {
         var response = await StaffClient.PostAsJsonAsync($"/api/v1/subcontractors/{subcontractorId}/contacts", new
