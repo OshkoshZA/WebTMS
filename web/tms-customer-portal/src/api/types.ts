@@ -15,6 +15,10 @@ export const INVOICE_STATUS = ['Draft', 'Issued', 'PartPaid', 'Paid', 'Void'] as
 
 export const CREDIT_NOTE_STATUS = ['Draft', 'Issued', 'Void'] as const
 
+export const EXCEPTION_SEVERITY = ['Info', 'Warning', 'Critical'] as const
+
+export const EXCEPTION_STATUS = ['Open', 'Acknowledged', 'Resolved'] as const
+
 export function label(values: readonly string[], value: number): string {
   return values[value] ?? `Unknown (${value})`
 }
@@ -130,4 +134,18 @@ export interface CreditNote {
   totalAmount: number
   pdfUrl: string | null
   lines: CreditNoteLine[]
+}
+
+export interface ExceptionRecord {
+  id: string
+  category: string
+  severity: number // EXCEPTION_SEVERITY
+  entityType: string
+  entityId: string
+  status: number // EXCEPTION_STATUS
+  raisedAt: string
+  assignedToUserId: string | null
+  description: string
+  resolvedAt: string | null
+  resolutionNotes: string | null
 }

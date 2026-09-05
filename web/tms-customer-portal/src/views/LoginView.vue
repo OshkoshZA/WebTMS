@@ -19,7 +19,7 @@ async function submit() {
   submitting.value = true
   try {
     await auth.login(email.value, password.value)
-    const redirect = typeof route.query.redirect === 'string' ? route.query.redirect : '/loads'
+    const redirect = typeof route.query.redirect === 'string' ? route.query.redirect : '/dashboard'
     await router.push(redirect)
   } catch (e) {
     error.value = e instanceof ApiError || e instanceof Error ? e.message : 'Something went wrong — please try again.'

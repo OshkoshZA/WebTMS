@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
-import { RouterLink, useRouter } from 'vue-router'
+import { RouterLink, useRoute, useRouter } from 'vue-router'
 import AppLayout from '../components/AppLayout.vue'
 import ErrorAlert from '../components/ErrorAlert.vue'
 import StatusBadge from '../components/StatusBadge.vue'
@@ -11,16 +11,22 @@ import { LOAD_STATUS, label, type Load } from '../api/types'
 import { loadStatusTone, formatDateTime } from '../lib/presentation'
 
 const router = useRouter()
+const route = useRoute()
 
 const loads = ref<Load[]>([])
 const loading = ref(true)
 const error = ref('')
 const search = ref('')
+// Pre-filled from ?status= so the dashboard's own load-count tiles have somewhere
+// real to drill into — still just a plain select here, no separate route per status.
+const statusFilter = ref(typeof route.query.status === 'string' ? Number(route.query.status) : -1)
 
 const filteredLoads = computed(() => {
   const term = search.value.trim().toLowerCase()
-  if (!term) return loads.value
-  return loads.value.filter((load) => load.referenceNo.toLowerCase().includes(term))
+  return loads.value.filter((load) => {
+    if (statusFilter.value !== -1 && load.status !== statusFilter.value) return false
+    return !term || load.referenceNo.toLowerCase().includes(term)
+  })
 })
 
 onMounted(async () => {
@@ -48,13 +54,17 @@ onMounted(async () => {
       </RouterLink>
     </div>
 
-    <div class="mt-6">
+    <div class="mt-6 flex gap-3">
       <input
         v-model="search"
         type="search"
         placeholder="Search by reference…"
         class="w-full max-w-sm rounded-md border border-slate-300 px-3 py-2 text-sm focus:border-slate-500 focus:outline-none"
       />
+      <select v-model.number="statusFilter" class="rounded-md border border-slate-300 px-3 py-2 text-sm">
+        <option :value="-1">All statuses</option>
+        <option v-for="(s, i) in LOAD_STATUS" :key="s" :value="i">{{ s }}</option>
+      </select>
     </div>
 
     <ErrorAlert v-if="error" :message="error" class="mt-4" />

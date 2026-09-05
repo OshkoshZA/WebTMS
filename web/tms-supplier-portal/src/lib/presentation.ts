@@ -50,6 +50,14 @@ export function supplierInvoiceStatusTone(status: number): Tone {
   return SUPPLIER_INVOICE_STATUS_TONE[status] ?? 'neutral'
 }
 
+export function exceptionSeverityTone(severity: number): Tone {
+  return severity === 2 ? 'danger' : severity === 1 ? 'warning' : 'info'
+}
+
+export function exceptionStatusTone(status: number): Tone {
+  return status === 0 ? 'danger' : status === 1 ? 'warning' : 'success'
+}
+
 export function formatDate(value: string | null): string {
   if (!value) return '—'
   return new Date(value).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' })

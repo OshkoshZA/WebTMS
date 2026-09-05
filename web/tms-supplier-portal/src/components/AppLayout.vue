@@ -18,6 +18,9 @@ async function logout() {
         <div class="flex items-center gap-6">
           <span class="text-lg font-semibold text-slate-900">TMS Supplier Portal</span>
           <nav class="flex gap-4 text-sm">
+            <router-link to="/dashboard" class="text-slate-600 hover:text-slate-900" active-class="font-semibold text-slate-900">
+              Dashboard
+            </router-link>
             <router-link to="/legs" class="text-slate-600 hover:text-slate-900" active-class="font-semibold text-slate-900">
               Legs
             </router-link>
@@ -26,6 +29,9 @@ async function logout() {
             </router-link>
             <router-link to="/supplier-invoices" class="text-slate-600 hover:text-slate-900" active-class="font-semibold text-slate-900">
               Invoices
+            </router-link>
+            <router-link to="/exceptions" class="text-slate-600 hover:text-slate-900" active-class="font-semibold text-slate-900">
+              Exceptions
             </router-link>
           </nav>
         </div>
