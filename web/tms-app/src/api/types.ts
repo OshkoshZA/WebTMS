@@ -93,6 +93,44 @@ export interface LoadType {
   description: string
 }
 
+export interface Currency {
+  id: string
+  code: string
+  name: string
+  symbol: string
+}
+
+export interface ClientCurrency {
+  id: string
+  clientId: string
+  currencyId: string
+  creditLimit: number
+}
+
+export interface CreditStatus {
+  currencyId: string
+  creditLimit: number
+  arOutstanding: number
+  wip: number
+  totalExposure: number
+  availableCredit: number
+}
+
+export interface CreateClientRequest {
+  name: string
+  registrationNo: string
+  currencyId: string
+  creditLimit: number
+  paymentTermsDays: number
+}
+
+export interface UpdateClientRequest {
+  name: string
+  registrationNo: string
+  creditLimit: number
+  paymentTermsDays: number
+}
+
 export interface Location {
   id: string
   name: string

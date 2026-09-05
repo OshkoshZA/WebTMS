@@ -32,6 +32,16 @@ export function loadLegStatusTone(status: number): Tone {
   return LOAD_LEG_STATUS_TONE[status] ?? 'neutral'
 }
 
+// Shared by every Active/Deactivated master-data resource (Client, Vehicle,
+// Subcontractor, ...) — §11.5's own convention, so one mapping covers them all.
+export function activeDeactivatedTone(status: number): Tone {
+  return status === 0 ? 'success' : 'neutral'
+}
+
+export function formatMoney(amount: number, currencyCode: string): string {
+  return `${amount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ${currencyCode}`
+}
+
 export function formatDateTime(value: string | null): string {
   if (!value) return '—'
   return new Date(value).toLocaleString(undefined, {

@@ -9,6 +9,9 @@ export const router = createRouter({
     { path: '/loads', name: 'loads-list', component: () => import('../views/LoadsListView.vue') },
     { path: '/loads/new', name: 'loads-new', component: () => import('../views/LoadCreateView.vue') },
     { path: '/loads/:id', name: 'loads-detail', component: () => import('../views/LoadDetailView.vue'), props: true },
+    { path: '/clients', name: 'clients-list', component: () => import('../views/ClientsListView.vue') },
+    { path: '/clients/new', name: 'clients-new', component: () => import('../views/ClientCreateView.vue') },
+    { path: '/clients/:id', name: 'clients-detail', component: () => import('../views/ClientDetailView.vue'), props: true },
     { path: '/:pathMatch(.*)*', redirect: '/loads' },
   ],
 })
