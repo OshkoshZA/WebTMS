@@ -1,6 +1,6 @@
 import { api } from './client'
 import type {
-  Client, ClientCurrency, Commodity, CostCentre, Currency, Driver, Location, LoadType,
+  Client, ClientCurrency, Commodity, Country, CostCentre, Currency, Driver, ExpenseType, Location, LoadType,
   Subcontractor, SubcontractorCurrency, UnitOfMeasure, Vehicle,
 } from './types'
 
@@ -17,6 +17,8 @@ export const referenceApi = {
   currencies: () => api.get<Currency[]>('/currencies'),
   commodities: () => api.get<Commodity[]>('/commodities'),
   unitsOfMeasure: () => api.get<UnitOfMeasure[]>('/units-of-measure'),
+  countries: () => api.get<Country[]>('/countries'),
+  expenseTypes: () => api.get<ExpenseType[]>('/expense-types'),
   clientCurrencies: (clientId: string) => api.get<ClientCurrency[]>(`/clients/${clientId}/currencies`),
   subcontractorCurrencies: (subcontractorId: string) =>
     api.get<SubcontractorCurrency[]>(`/subcontractors/${subcontractorId}/currencies`),

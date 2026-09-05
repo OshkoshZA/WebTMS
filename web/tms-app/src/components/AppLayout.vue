@@ -39,6 +39,21 @@ async function logout() {
             <router-link to="/cost-centres" class="text-slate-600 hover:text-slate-900" active-class="font-semibold text-slate-900">
               Cost centres
             </router-link>
+            <router-link to="/locations" class="text-slate-600 hover:text-slate-900" active-class="font-semibold text-slate-900">
+              Locations
+            </router-link>
+            <router-link to="/commodities" class="text-slate-600 hover:text-slate-900" active-class="font-semibold text-slate-900">
+              Commodities
+            </router-link>
+            <router-link to="/expense-types" class="text-slate-600 hover:text-slate-900" active-class="font-semibold text-slate-900">
+              Expense types
+            </router-link>
+            <router-link to="/load-types" class="text-slate-600 hover:text-slate-900" active-class="font-semibold text-slate-900">
+              Load types
+            </router-link>
+            <router-link to="/currencies" class="text-slate-600 hover:text-slate-900" active-class="font-semibold text-slate-900">
+              Currencies
+            </router-link>
             <router-link to="/exceptions" class="text-slate-600 hover:text-slate-900" active-class="font-semibold text-slate-900">
               Exceptions
             </router-link>

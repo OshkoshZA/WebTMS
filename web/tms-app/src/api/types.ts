@@ -205,6 +205,19 @@ export interface Location {
   active: boolean
 }
 
+export interface Country {
+  id: string
+  code: string
+  name: string
+}
+
+export interface ExpenseType {
+  id: string
+  code: string
+  name: string
+  active: boolean
+}
+
 export interface CostCentre {
   id: string
   code: string

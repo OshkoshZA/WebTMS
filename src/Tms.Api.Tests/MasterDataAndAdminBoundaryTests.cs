@@ -35,6 +35,7 @@ public class MasterDataAndAdminBoundaryTests
         new object[] { "/api/v1/locations" },
         new object[] { "/api/v1/vehicles" },
         new object[] { "/api/v1/units-of-measure" },
+        new object[] { "/api/v1/countries" },
     };
 
     // Blocked for a Client Portal contact but NOT for a Subcontractor Portal contact —
