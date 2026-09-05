@@ -5,7 +5,10 @@ using Microsoft.EntityFrameworkCore;
 using Tms.Api.Services;
 using Tms.Infrastructure;
 using Tms.Modules.Audit;
+using Tms.Modules.Billing;
+using Tms.Modules.Debrief;
 using Tms.Modules.Exceptions;
+using Tms.Modules.Loads;
 using Tms.Shared;
 
 namespace Tms.Api.Controllers;
@@ -34,31 +37,83 @@ public class ExceptionsController : ControllerBase
     private readonly TmsDbContext _db;
     private readonly ICurrentUserAccessor _currentUser;
     private readonly ITenantContext _tenantContext;
+    private readonly IAuthorizationService _authorizationService;
 
-    public ExceptionsController(TmsDbContext db, ICurrentUserAccessor currentUser, ITenantContext tenantContext)
+    public ExceptionsController(
+        TmsDbContext db, ICurrentUserAccessor currentUser, ITenantContext tenantContext, IAuthorizationService authorizationService)
     {
         _db = db;
         _currentUser = currentUser;
         _tenantContext = tenantContext;
+        _authorizationService = authorizationService;
     }
 
     /// <summary>
-    /// Never part of either portal's documented scope — the ClientContact/
-    /// SubcontractorContact scoped exception views §16.1 itself describes need row-level
-    /// scoping this table doesn't have (an ExceptionRecord names an EntityType/EntityId,
-    /// not a Client/Subcontractor directly), so rather than build that out speculatively,
-    /// any portal contact is Forbidden outright — the company-wide internal dashboard
-    /// view stays internal-staff-only until that scoping is actually built.
+    /// An ExceptionRecord names an EntityType/EntityId, not a Client/Subcontractor
+    /// directly (§16.1's own polymorphic-reference design), so scoping one to a portal
+    /// caller means resolving each of the three currently-wired sources (§16.1's Fig.
+    /// 13) back to the party that owns it: "Client" is already the ClientId itself;
+    /// "SupplierInvoice" carries its own SubcontractorId; "Debrief" needs a join through
+    /// its LoadLeg to either the Load's ClientId or the leg's own SubcontractorId. The
+    /// other three documented sources (accounting sync failure, compliance expiry, DSR
+    /// deadline) aren't wired into ExceptionService.Raise anywhere yet, so there's
+    /// nothing to resolve for them either way.
+    /// </summary>
+    private async Task<IReadOnlyCollection<Guid>> OwnDebriefIdsForClientAsync(Guid clientId, CancellationToken ct) =>
+        await _db.Set<Debrief>()
+            .Join(_db.LoadLegs, d => d.LoadLegId, l => l.Id, (d, l) => new { d, l })
+            .Join(_db.Loads, x => x.l.LoadId, load => load.Id, (x, load) => new { x.d, load })
+            .Where(x => x.load.ClientId == clientId)
+            .Select(x => x.d.Id)
+            .ToListAsync(ct);
+
+    private async Task<IReadOnlyCollection<Guid>> OwnDebriefIdsForSubcontractorAsync(Guid subcontractorId, CancellationToken ct) =>
+        await _db.Set<Debrief>()
+            .Join(_db.LoadLegs, d => d.LoadLegId, l => l.Id, (d, l) => new { d, l })
+            .Where(x => x.l.SubcontractorId == subcontractorId)
+            .Select(x => x.d.Id)
+            .ToListAsync(ct);
+
+    /// <summary>
+    /// A Customer Portal contact's own view — exceptions tied to their own loads
+    /// (Debrief) or raised against their own Client directly (CreditOverride). A
+    /// Supplier Portal contact (ClientId null, same as staff) is explicitly Forbidden
+    /// rather than silently falling through to the unrestricted staff branch below —
+    /// the exact bug shape every other portal-scoping fix in this codebase has closed.
     /// </summary>
     [HttpGet]
     public async Task<ActionResult<IEnumerable<ExceptionResponse>>> List(ExceptionStatus? status, CancellationToken ct)
     {
-        if (_tenantContext.SubcontractorId is not null || _tenantContext.ClientId is not null) return Forbid();
-
-        // No explicit tenant/company filtering here — TmsDbContext's global query
-        // filters (§4.1) already scope this to the caller's own company, the same
-        // convention every other List action in this codebase follows.
         var query = _db.Set<ExceptionRecord>().AsQueryable();
+
+        if (_tenantContext.ClientId is Guid clientId)
+        {
+            var authResult = await _authorizationService.AuthorizeAsync(User, "portal.client.viewloads");
+            if (!authResult.Succeeded) return Forbid();
+
+            var debriefIds = await OwnDebriefIdsForClientAsync(clientId, ct);
+            query = query.Where(e =>
+                (e.EntityType == nameof(Tms.Modules.Loads.Client) && e.EntityId == clientId) ||
+                (e.EntityType == nameof(Debrief) && debriefIds.Contains(e.EntityId)));
+        }
+        else if (_tenantContext.SubcontractorId is Guid subcontractorId)
+        {
+            var authResult = await _authorizationService.AuthorizeAsync(User, "portal.subcontractor.viewlegs");
+            if (!authResult.Succeeded) return Forbid();
+
+            var supplierInvoiceIds = await _db.SupplierInvoices
+                .Where(si => si.SubcontractorId == subcontractorId)
+                .Select(si => si.Id)
+                .ToListAsync(ct);
+            var debriefIds = await OwnDebriefIdsForSubcontractorAsync(subcontractorId, ct);
+            query = query.Where(e =>
+                (e.EntityType == nameof(SupplierInvoice) && supplierInvoiceIds.Contains(e.EntityId)) ||
+                (e.EntityType == nameof(Debrief) && debriefIds.Contains(e.EntityId)));
+        }
+        // Neither scoping id set — internal staff — sees every exception in the
+        // company, the same as before this scoping existed; TmsDbContext's global
+        // query filters (§4.1) already keep this to the caller's own company.
+
         if (status is ExceptionStatus s) query = query.Where(e => e.Status == s);
 
         var records = await query.OrderByDescending(e => e.RaisedAt).ToListAsync(ct);
@@ -68,10 +123,31 @@ public class ExceptionsController : ControllerBase
     [HttpGet("{id:guid}")]
     public async Task<ActionResult<ExceptionResponse>> Get(Guid id, CancellationToken ct)
     {
-        if (_tenantContext.SubcontractorId is not null || _tenantContext.ClientId is not null) return Forbid();
-
         var record = await _db.Set<ExceptionRecord>().FirstOrDefaultAsync(e => e.Id == id, ct);
-        return record is null ? NotFound() : Ok(ToResponse(record));
+        if (record is null) return NotFound();
+
+        if (_tenantContext.ClientId is Guid clientId)
+        {
+            var authResult = await _authorizationService.AuthorizeAsync(User, "portal.client.viewloads");
+            if (!authResult.Succeeded) return Forbid();
+
+            var visible = record.EntityType == nameof(Tms.Modules.Loads.Client)
+                ? record.EntityId == clientId
+                : record.EntityType == nameof(Debrief) && (await OwnDebriefIdsForClientAsync(clientId, ct)).Contains(record.EntityId);
+            if (!visible) return Forbid();
+        }
+        else if (_tenantContext.SubcontractorId is Guid subcontractorId)
+        {
+            var authResult = await _authorizationService.AuthorizeAsync(User, "portal.subcontractor.viewlegs");
+            if (!authResult.Succeeded) return Forbid();
+
+            var visible = record.EntityType == nameof(SupplierInvoice)
+                ? await _db.SupplierInvoices.AnyAsync(si => si.Id == record.EntityId && si.SubcontractorId == subcontractorId, ct)
+                : record.EntityType == nameof(Debrief) && (await OwnDebriefIdsForSubcontractorAsync(subcontractorId, ct)).Contains(record.EntityId);
+            if (!visible) return Forbid();
+        }
+
+        return Ok(ToResponse(record));
     }
 
     /// <summary>Claims an Open exception — records who's looking at it, without yet asserting it's actually fixed (that's Resolve).</summary>

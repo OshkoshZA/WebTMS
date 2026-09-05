@@ -27,7 +27,6 @@ public class MasterDataAndAdminBoundaryTests
         new object[] { "/api/v1/functions" },
         new object[] { "/api/v1/api-clients" },
         new object[] { "/api/v1/debriefs" },
-        new object[] { "/api/v1/exceptions" },
         new object[] { "/api/v1/financial-periods" },
         new object[] { "/api/v1/financial-years" },
         new object[] { "/api/v1/commodities" },
