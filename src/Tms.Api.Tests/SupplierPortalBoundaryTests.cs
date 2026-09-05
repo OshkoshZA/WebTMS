@@ -159,20 +159,29 @@ public class SupplierPortalBoundaryTests
     [Fact]
     public async Task ExpenseTypes_list_and_get_are_open_to_subcontractor_portal_but_still_reject_client_contact()
     {
+        // DevelopmentSeeder never seeds an ExpenseType, so a fresh database has none —
+        // create one here rather than assuming some other test already has, which
+        // would make this test's own pass/fail depend on test execution order.
+        var suffix = Guid.NewGuid().ToString("N")[..8];
+        var createResponse = await _fixture.StaffClient.PostAsJsonAsync(
+            "/api/v1/expense-types", new { code = $"ET-{suffix}", name = $"Test Expense Type {suffix}" });
+        Assert.Equal(HttpStatusCode.Created, createResponse.StatusCode);
+        var created = await createResponse.Content.ReadFromJsonAsync<JsonElementLike>();
+
         using var mine = _fixture.CreateAuthenticatedClient(_fixture.SubcontractorToken);
         var listResponse = await mine.GetAsync("/api/v1/expense-types");
         Assert.Equal(HttpStatusCode.OK, listResponse.StatusCode);
         var types = await listResponse.Content.ReadFromJsonAsync<List<JsonElementLike>>();
-        Assert.NotEmpty(types!);
+        Assert.Contains(types!, t => t.Id == created!.Id);
 
-        var getResponse = await mine.GetAsync($"/api/v1/expense-types/{types![0].Id}");
+        var getResponse = await mine.GetAsync($"/api/v1/expense-types/{created!.Id}");
         Assert.Equal(HttpStatusCode.OK, getResponse.StatusCode);
 
         using var wrongType = _fixture.CreateAuthenticatedClient(_fixture.ClientToken);
         var asClientListResponse = await wrongType.GetAsync("/api/v1/expense-types");
         Assert.Equal(HttpStatusCode.Forbidden, asClientListResponse.StatusCode);
 
-        var asClientGetResponse = await wrongType.GetAsync($"/api/v1/expense-types/{types[0].Id}");
+        var asClientGetResponse = await wrongType.GetAsync($"/api/v1/expense-types/{created.Id}");
         Assert.Equal(HttpStatusCode.Forbidden, asClientGetResponse.StatusCode);
     }
 
