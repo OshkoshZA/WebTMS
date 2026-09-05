@@ -8,9 +8,11 @@ import { referenceApi } from '../api/reference'
 import { ApiError } from '../api/client'
 import {
   LOAD_LEG_EXECUTION_TYPE, LOAD_LEG_STATUS, LOAD_STATUS, label,
-  type Client, type CostCentre, type Driver, type Load, type LoadType, type Location, type Subcontractor, type Vehicle,
+  type Client, type ClientCurrency, type Commodity, type CommodityLine, type CostCentre, type Currency, type Driver,
+  type Load, type LoadMargin, type LoadType, type Location, type Subcontractor, type SubcontractorCurrency,
+  type UnitOfMeasure, type Vehicle,
 } from '../api/types'
-import { loadLegStatusTone, loadStatusTone, formatDateTime } from '../lib/presentation'
+import { loadLegStatusTone, loadStatusTone, formatDateTime, formatMoney } from '../lib/presentation'
 
 const props = defineProps<{ id: string }>()
 
@@ -22,6 +24,11 @@ const costCentres = ref<CostCentre[]>([])
 const vehicles = ref<Vehicle[]>([])
 const drivers = ref<Driver[]>([])
 const subcontractors = ref<Subcontractor[]>([])
+const currencies = ref<Currency[]>([])
+const commodities = ref<Commodity[]>([])
+const unitsOfMeasure = ref<UnitOfMeasure[]>([])
+const clientCurrencies = ref<ClientCurrency[]>([])
+const margin = ref<LoadMargin | null>(null)
 
 const loading = ref(true)
 const error = ref('')
@@ -48,22 +55,42 @@ function resourceLabel(legVehicleId: string | null, legDriverId: string | null, 
   }
   return 'Unassigned'
 }
+function currencyCode(currencyId: string | null): string {
+  if (!currencyId) return ''
+  return currencies.value.find((c) => c.id === currencyId)?.code ?? currencyId
+}
+function commodityLabel(id: string): string {
+  const c = commodities.value.find((cm) => cm.id === id)
+  return c ? `${c.code} — ${c.name}` : id
+}
+function uomCode(id: string): string {
+  return unitsOfMeasure.value.find((u) => u.id === id)?.code ?? id
+}
+function marginForLeg(legId: string) {
+  return margin.value?.legs.find((l) => l.legId === legId) ?? null
+}
 
 async function loadEverything() {
   loading.value = true
   error.value = ''
   try {
-    const [loadData, clientList, loadTypeList, locationList, costCentreList, vehicleList, driverList, subcontractorList] =
-      await Promise.all([
-        loadsApi.get(props.id),
-        referenceApi.clients(),
-        referenceApi.loadTypes(),
-        referenceApi.locations(),
-        referenceApi.costCentres(),
-        referenceApi.vehicles(),
-        referenceApi.drivers(),
-        referenceApi.subcontractors(),
-      ])
+    const [
+      loadData, clientList, loadTypeList, locationList, costCentreList, vehicleList, driverList, subcontractorList,
+      currencyList, commodityList, unitOfMeasureList, marginData,
+    ] = await Promise.all([
+      loadsApi.get(props.id),
+      referenceApi.clients(),
+      referenceApi.loadTypes(),
+      referenceApi.locations(),
+      referenceApi.costCentres(),
+      referenceApi.vehicles(),
+      referenceApi.drivers(),
+      referenceApi.subcontractors(),
+      referenceApi.currencies(),
+      referenceApi.commodities(),
+      referenceApi.unitsOfMeasure(),
+      loadsApi.margin(props.id),
+    ])
     load.value = loadData
     clients.value = clientList
     loadTypes.value = loadTypeList
@@ -72,6 +99,11 @@ async function loadEverything() {
     vehicles.value = vehicleList
     drivers.value = driverList
     subcontractors.value = subcontractorList
+    currencies.value = currencyList
+    commodities.value = commodityList
+    unitsOfMeasure.value = unitOfMeasureList
+    margin.value = marginData
+    clientCurrencies.value = await referenceApi.clientCurrencies(loadData.clientId)
   } catch (e) {
     error.value = e instanceof ApiError ? e.message : 'Could not load this load.'
   } finally {
@@ -167,6 +199,109 @@ function startLeg(legId: string) {
 }
 function deliverLeg(legId: string) {
   runAction(() => loadsApi.deliverLeg(props.id, legId))
+}
+
+// --- Per-leg commodity lines (one panel open at a time) ---
+// Append-only, same as the API itself (§5.5) — there's no edit/remove action to wire up.
+const commodityLegId = ref<string | null>(null)
+const commodityLines = ref<CommodityLine[]>([])
+const commodityLinesLoading = ref(false)
+const subcontractorCurrencies = ref<SubcontractorCurrency[]>([])
+const commodityActionError = ref('')
+const commodityActionBusy = ref(false)
+// Only a credit-limit breach (422) offers an override — every other error just needs
+// the message shown and the form fixed, the same distinction LoadCreateView makes.
+const commodityCreditBreach = ref(false)
+
+const newCommodityLine = ref({
+  commodityId: '', quantity: 1, unitOfMeasureId: '', sellRatePerUnit: 0, sellCurrencyId: '',
+  buyRatePerUnit: 0, buyCurrencyId: '', creditOverrideReason: '',
+})
+
+function sellCurrencyOptionsFor(clientId: string): Currency[] {
+  const client = clients.value.find((c) => c.id === clientId)
+  if (!client) return []
+  const ids = [client.currencyId, ...clientCurrencies.value.map((cc) => cc.currencyId)]
+  return currencies.value.filter((c) => ids.includes(c.id))
+}
+
+// A leg not yet Allocated to a subcontractor has no allow-list to check against yet
+// (LoadsController.AddCommodityLine's own rule) — every currency is offered instead,
+// with no default preselected, forcing an explicit choice rather than guessing one.
+const buyCurrencyOptions = computed(() => {
+  const leg = load.value?.legs.find((l) => l.id === commodityLegId.value)
+  if (!leg?.subcontractorId) return currencies.value
+  const subcontractor = subcontractors.value.find((s) => s.id === leg.subcontractorId)
+  if (!subcontractor) return currencies.value
+  const ids = [subcontractor.currencyId, ...subcontractorCurrencies.value.map((sc) => sc.currencyId)]
+  return currencies.value.filter((c) => ids.includes(c.id))
+})
+
+async function openCommodityPanel(leg: { id: string; subcontractorId: string | null }) {
+  commodityLegId.value = leg.id
+  commodityActionError.value = ''
+  commodityCreditBreach.value = false
+  const client = clients.value.find((c) => c.id === load.value?.clientId)
+  newCommodityLine.value = {
+    commodityId: '', quantity: 1, unitOfMeasureId: '', sellRatePerUnit: 0, sellCurrencyId: client?.currencyId ?? '',
+    buyRatePerUnit: 0, buyCurrencyId: leg.subcontractorId ? (subcontractors.value.find((s) => s.id === leg.subcontractorId)?.currencyId ?? '') : '',
+    creditOverrideReason: '',
+  }
+
+  commodityLinesLoading.value = true
+  try {
+    const [lines, subCurrencies] = await Promise.all([
+      loadsApi.commodityLines(props.id, leg.id),
+      leg.subcontractorId ? referenceApi.subcontractorCurrencies(leg.subcontractorId) : Promise.resolve([]),
+    ])
+    commodityLines.value = lines
+    subcontractorCurrencies.value = subCurrencies
+  } catch (e) {
+    commodityActionError.value = e instanceof ApiError ? e.message : 'Could not load this leg\'s commodity lines.'
+  } finally {
+    commodityLinesLoading.value = false
+  }
+}
+
+function onCommodityChange() {
+  const commodity = commodities.value.find((c) => c.id === newCommodityLine.value.commodityId)
+  if (commodity) newCommodityLine.value.unitOfMeasureId = commodity.defaultUnitOfMeasureId
+}
+
+async function submitCommodityLine(legExecutionType: number) {
+  if (!commodityLegId.value) return
+  commodityActionError.value = ''
+  commodityActionBusy.value = true
+  try {
+    await loadsApi.addCommodityLine(props.id, commodityLegId.value, {
+      commodityId: newCommodityLine.value.commodityId,
+      quantity: newCommodityLine.value.quantity,
+      unitOfMeasureId: newCommodityLine.value.unitOfMeasureId,
+      sellRatePerUnit: newCommodityLine.value.sellRatePerUnit,
+      sellCurrencyId: newCommodityLine.value.sellCurrencyId || undefined,
+      buyRatePerUnit: legExecutionType === 1 ? newCommodityLine.value.buyRatePerUnit : undefined,
+      buyCurrencyId: legExecutionType === 1 ? newCommodityLine.value.buyCurrencyId || undefined : undefined,
+      creditOverrideReason: newCommodityLine.value.creditOverrideReason || undefined,
+    })
+    commodityCreditBreach.value = false
+    newCommodityLine.value.creditOverrideReason = ''
+    const [lines, marginData] = await Promise.all([
+      loadsApi.commodityLines(props.id, commodityLegId.value),
+      loadsApi.margin(props.id),
+    ])
+    commodityLines.value = lines
+    margin.value = marginData
+  } catch (e) {
+    if (e instanceof ApiError) {
+      commodityActionError.value = e.message
+      commodityCreditBreach.value = e.status === 422
+    } else {
+      commodityActionError.value = 'Something went wrong — please try again.'
+      commodityCreditBreach.value = false
+    }
+  } finally {
+    commodityActionBusy.value = false
+  }
 }
 </script>
 
@@ -302,6 +437,7 @@ function deliverLeg(legId: string) {
               <th class="px-4 py-3">Execution</th>
               <th class="px-4 py-3">Resource</th>
               <th class="px-4 py-3">Status</th>
+              <th class="px-4 py-3">Margin</th>
               <th class="px-4 py-3">Action</th>
             </tr>
           </thead>
@@ -314,38 +450,58 @@ function deliverLeg(legId: string) {
                 <td class="px-4 py-3 text-slate-600">{{ label(LOAD_LEG_EXECUTION_TYPE, leg.executionType) }}</td>
                 <td class="px-4 py-3 text-slate-600">{{ resourceLabel(leg.vehicleId, leg.driverId, leg.subcontractorId) }}</td>
                 <td class="px-4 py-3"><StatusBadge :text="label(LOAD_LEG_STATUS, leg.status)" :tone="loadLegStatusTone(leg.status)" /></td>
+                <td class="px-4 py-3 text-slate-600">
+                  <template v-if="marginForLeg(leg.id)">
+                    <div>Sell {{ formatMoney(marginForLeg(leg.id)!.sellTotal, currencyCode(marginForLeg(leg.id)!.sellCurrencyId)) }}</div>
+                    <div v-if="marginForLeg(leg.id)!.buyCurrencyId">Buy {{ formatMoney(marginForLeg(leg.id)!.buyTotal, currencyCode(marginForLeg(leg.id)!.buyCurrencyId)) }}</div>
+                    <div v-if="marginForLeg(leg.id)!.margin !== null" class="font-medium" :class="marginForLeg(leg.id)!.margin! < 0 ? 'text-rose-700' : 'text-emerald-700'">
+                      Margin {{ formatMoney(marginForLeg(leg.id)!.margin!, currencyCode(marginForLeg(leg.id)!.sellCurrencyId)) }}
+                    </div>
+                    <div v-else-if="marginForLeg(leg.id)!.note" class="text-xs text-amber-700">{{ marginForLeg(leg.id)!.note }}</div>
+                  </template>
+                  <span v-else class="text-slate-400">—</span>
+                </td>
                 <td class="px-4 py-3">
-                  <button
-                    v-if="leg.status === 0"
-                    type="button"
-                    :disabled="actionBusy"
-                    class="rounded-md border border-slate-300 px-2.5 py-1 text-xs font-medium text-slate-700 hover:bg-slate-100 disabled:opacity-50"
-                    @click="openAllocate(leg.id)"
-                  >
-                    Allocate
-                  </button>
-                  <button
-                    v-else-if="leg.status === 1"
-                    type="button"
-                    :disabled="actionBusy"
-                    class="rounded-md border border-slate-300 px-2.5 py-1 text-xs font-medium text-slate-700 hover:bg-slate-100 disabled:opacity-50"
-                    @click="startLeg(leg.id)"
-                  >
-                    Start
-                  </button>
-                  <button
-                    v-else-if="leg.status === 2"
-                    type="button"
-                    :disabled="actionBusy"
-                    class="rounded-md border border-slate-300 px-2.5 py-1 text-xs font-medium text-slate-700 hover:bg-slate-100 disabled:opacity-50"
-                    @click="deliverLeg(leg.id)"
-                  >
+                  <div class="flex flex-col gap-1.5">
+                    <button
+                      v-if="leg.status === 0"
+                      type="button"
+                      :disabled="actionBusy"
+                      class="rounded-md border border-slate-300 px-2.5 py-1 text-xs font-medium text-slate-700 hover:bg-slate-100 disabled:opacity-50"
+                      @click="openAllocate(leg.id)"
+                    >
+                      Allocate
+                    </button>
+                    <button
+                      v-else-if="leg.status === 1"
+                      type="button"
+                      :disabled="actionBusy"
+                      class="rounded-md border border-slate-300 px-2.5 py-1 text-xs font-medium text-slate-700 hover:bg-slate-100 disabled:opacity-50"
+                      @click="startLeg(leg.id)"
+                    >
+                      Start
+                    </button>
+                    <button
+                      v-else-if="leg.status === 2"
+                      type="button"
+                      :disabled="actionBusy"
+                      class="rounded-md border border-slate-300 px-2.5 py-1 text-xs font-medium text-slate-700 hover:bg-slate-100 disabled:opacity-50"
+                      @click="deliverLeg(leg.id)"
+                    >
                     Deliver
                   </button>
+                    <button
+                      type="button"
+                      class="rounded-md border border-slate-300 px-2.5 py-1 text-xs font-medium text-slate-700 hover:bg-slate-100"
+                      @click="commodityLegId === leg.id ? (commodityLegId = null) : openCommodityPanel(leg)"
+                    >
+                      {{ commodityLegId === leg.id ? 'Hide commodities' : 'Commodities' }}
+                    </button>
+                  </div>
                 </td>
               </tr>
               <tr v-if="allocatingLegId === leg.id" class="border-b border-slate-100 bg-slate-50 last:border-0">
-                <td colspan="7" class="px-4 py-3">
+                <td colspan="8" class="px-4 py-3">
                   <form class="flex flex-wrap items-end gap-3" @submit.prevent="submitAllocate(leg.id, leg.executionType)">
                     <template v-if="leg.executionType === 0">
                       <label class="flex flex-col gap-1 text-sm text-slate-700">
@@ -379,9 +535,124 @@ function deliverLeg(legId: string) {
                   </form>
                 </td>
               </tr>
+              <tr v-if="commodityLegId === leg.id" class="border-b border-slate-100 bg-slate-50 last:border-0">
+                <td colspan="8" class="px-4 py-3">
+                  <ErrorAlert v-if="commodityActionError" :message="commodityActionError" class="mb-3" />
+                  <p v-if="commodityLinesLoading" class="text-sm text-slate-500">Loading…</p>
+                  <template v-else>
+                    <table v-if="commodityLines.length" class="w-full text-left text-sm">
+                      <thead class="text-xs uppercase tracking-wide text-slate-500">
+                        <tr>
+                          <th class="py-1 pr-4">Commodity</th>
+                          <th class="py-1 pr-4">Qty</th>
+                          <th class="py-1 pr-4">UoM</th>
+                          <th class="py-1 pr-4">Sell</th>
+                          <th class="py-1">Buy</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        <tr v-for="line in commodityLines" :key="line.id">
+                          <td class="py-1 pr-4 text-slate-900">{{ commodityLabel(line.commodityId) }}</td>
+                          <td class="py-1 pr-4 text-slate-600">{{ line.quantity }}</td>
+                          <td class="py-1 pr-4 text-slate-600">{{ uomCode(line.unitOfMeasureId) }}</td>
+                          <td class="py-1 pr-4 text-slate-600">
+                            {{ formatMoney(line.sellRatePerUnit, currencyCode(line.sellCurrencyId)) }}/unit ({{ formatMoney(line.sellAmount, currencyCode(line.sellCurrencyId)) }})
+                          </td>
+                          <td class="py-1 text-slate-600">
+                            <template v-if="line.buyRatePerUnit !== null">
+                              {{ formatMoney(line.buyRatePerUnit, currencyCode(line.buyCurrencyId)) }}/unit ({{ formatMoney(line.buyAmount!, currencyCode(line.buyCurrencyId)) }})
+                            </template>
+                            <span v-else class="text-slate-400">—</span>
+                          </td>
+                        </tr>
+                      </tbody>
+                    </table>
+                    <p v-else class="text-sm text-slate-500">No commodity lines yet.</p>
+
+                    <form
+                      class="mt-4 flex flex-wrap items-end gap-3 border-t border-slate-200 pt-4"
+                      @submit.prevent="submitCommodityLine(leg.executionType)"
+                    >
+                      <label class="flex flex-col gap-1 text-sm text-slate-700">
+                        Commodity
+                        <select
+                          v-model="newCommodityLine.commodityId"
+                          required
+                          class="rounded-md border border-slate-300 px-3 py-2 text-sm"
+                          @change="onCommodityChange"
+                        >
+                          <option value="" disabled>Select…</option>
+                          <option v-for="c in commodities" :key="c.id" :value="c.id">{{ c.code }} — {{ c.name }}</option>
+                        </select>
+                      </label>
+                      <label class="flex flex-col gap-1 text-sm text-slate-700">
+                        Quantity
+                        <input
+                          v-model.number="newCommodityLine.quantity"
+                          type="number" step="any" min="0" required
+                          class="w-24 rounded-md border border-slate-300 px-3 py-2 text-sm"
+                        />
+                      </label>
+                      <label class="flex flex-col gap-1 text-sm text-slate-700">
+                        Unit
+                        <select v-model="newCommodityLine.unitOfMeasureId" required class="rounded-md border border-slate-300 px-3 py-2 text-sm">
+                          <option value="" disabled>Select…</option>
+                          <option v-for="u in unitsOfMeasure" :key="u.id" :value="u.id">{{ u.code }}</option>
+                        </select>
+                      </label>
+                      <label class="flex flex-col gap-1 text-sm text-slate-700">
+                        Sell rate/unit
+                        <input
+                          v-model.number="newCommodityLine.sellRatePerUnit"
+                          type="number" step="any" min="0" required
+                          class="w-28 rounded-md border border-slate-300 px-3 py-2 text-sm"
+                        />
+                      </label>
+                      <label class="flex flex-col gap-1 text-sm text-slate-700">
+                        Sell currency
+                        <select v-model="newCommodityLine.sellCurrencyId" required class="rounded-md border border-slate-300 px-3 py-2 text-sm">
+                          <option v-for="c in sellCurrencyOptionsFor(load.clientId)" :key="c.id" :value="c.id">{{ c.code }}</option>
+                        </select>
+                      </label>
+                      <template v-if="leg.executionType === 1">
+                        <label class="flex flex-col gap-1 text-sm text-slate-700">
+                          Buy rate/unit
+                          <input
+                            v-model.number="newCommodityLine.buyRatePerUnit"
+                            type="number" step="any" min="0" required
+                            class="w-28 rounded-md border border-slate-300 px-3 py-2 text-sm"
+                          />
+                        </label>
+                        <label class="flex flex-col gap-1 text-sm text-slate-700">
+                          Buy currency
+                          <select v-model="newCommodityLine.buyCurrencyId" required class="rounded-md border border-slate-300 px-3 py-2 text-sm">
+                            <option value="" disabled>Select…</option>
+                            <option v-for="c in buyCurrencyOptions" :key="c.id" :value="c.id">{{ c.code }}</option>
+                          </select>
+                        </label>
+                      </template>
+                      <label v-if="commodityCreditBreach" class="flex flex-col gap-1 text-sm text-slate-700">
+                        Reason for credit-limit override
+                        <input
+                          v-model="newCommodityLine.creditOverrideReason"
+                          type="text" required
+                          class="rounded-md border border-slate-300 px-3 py-2 text-sm"
+                        />
+                      </label>
+                      <button
+                        type="submit"
+                        :disabled="commodityActionBusy"
+                        class="rounded-md bg-slate-900 px-3 py-2 text-sm text-white disabled:opacity-50"
+                      >
+                        {{ commodityActionBusy ? 'Adding…' : commodityCreditBreach ? 'Retry with override' : 'Add line' }}
+                      </button>
+                    </form>
+                  </template>
+                </td>
+              </tr>
             </template>
             <tr v-if="load.legs.length === 0">
-              <td colspan="7" class="px-4 py-6 text-center text-slate-500">No legs yet.</td>
+              <td colspan="8" class="px-4 py-6 text-center text-slate-500">No legs yet.</td>
             </tr>
           </tbody>
         </table>

@@ -185,6 +185,21 @@ public class SupplierPortalBoundaryTests
         Assert.Equal(HttpStatusCode.Forbidden, asClientGetResponse.StatusCode);
     }
 
+    /// <summary>ListCommodityLines (added to let a Load Detail screen re-fetch a leg's own rate breakdown after a reload) mirrors Margin's own access rule — internal staff only, no portal-scoped variant, since rate/margin data is never part of either portal's documented scope.</summary>
+    [Fact]
+    public async Task CommodityLines_list_rejects_both_portal_types()
+    {
+        using var subcontractor = _fixture.CreateAuthenticatedClient(_fixture.SubcontractorToken);
+        var subResponse = await subcontractor.GetAsync(
+            $"/api/v1/loads/{_fixture.SubcontractorLegLoadId}/legs/{_fixture.SubcontractorLegId}/commodity-lines");
+        Assert.Equal(HttpStatusCode.Forbidden, subResponse.StatusCode);
+
+        using var client = _fixture.CreateAuthenticatedClient(_fixture.ClientToken);
+        var clientResponse = await client.GetAsync(
+            $"/api/v1/loads/{_fixture.SubcontractorLegLoadId}/legs/{_fixture.SubcontractorLegId}/commodity-lines");
+        Assert.Equal(HttpStatusCode.Forbidden, clientResponse.StatusCode);
+    }
+
     [Fact]
     public async Task SubcontractorContacts_list_rejects_other_subcontractor_and_client_contact()
     {

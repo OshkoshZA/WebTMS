@@ -23,6 +23,8 @@ export const EXCEPTION_SEVERITY = ['Info', 'Warning', 'Critical'] as const
 
 export const EXCEPTION_STATUS = ['Open', 'Acknowledged', 'Resolved'] as const
 
+export const COMMODITY_CATEGORY = ['Fuel', 'BulkLiquid', 'DryBulk', 'BreakBulk', 'General'] as const
+
 export function label(values: readonly string[], value: number): string {
   return values[value] ?? `Unknown (${value})`
 }
@@ -80,6 +82,64 @@ export interface AllocateLoadLegRequest {
   vehicleId?: string
   driverId?: string
   subcontractorId?: string
+}
+
+export interface Commodity {
+  id: string
+  code: string
+  name: string
+  defaultUnitOfMeasureId: string
+  category: number // COMMODITY_CATEGORY
+  active: boolean
+}
+
+export interface UnitOfMeasure {
+  id: string
+  code: string
+  description: string
+}
+
+export interface AddCommodityLineRequest {
+  commodityId: string
+  quantity: number
+  unitOfMeasureId: string
+  sellRatePerUnit: number
+  buyRatePerUnit?: number
+  sellCurrencyId?: string
+  buyCurrencyId?: string
+  creditOverrideReason?: string
+}
+
+export interface CommodityLine {
+  id: string
+  loadLegId: string
+  commodityId: string
+  quantity: number
+  unitOfMeasureId: string
+  sequenceNo: number
+  sellCurrencyId: string
+  sellRatePerUnit: number
+  sellAmount: number
+  buyCurrencyId: string | null
+  buyRatePerUnit: number | null
+  buyAmount: number | null
+}
+
+export interface LoadLegMargin {
+  legId: string
+  sellCurrencyId: string | null
+  sellTotal: number
+  buyCurrencyId: string | null
+  buyTotal: number
+  exchangeRateUsed: number | null
+  convertedBuyTotal: number | null
+  margin: number | null
+  note: string | null
+}
+
+export interface LoadMargin {
+  loadId: string
+  legs: LoadLegMargin[]
 }
 
 export interface Client {

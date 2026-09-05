@@ -53,6 +53,11 @@ public record LoadLegMarginResponse(
 
 public record LoadMarginResponse(Guid LoadId, IReadOnlyList<LoadLegMarginResponse> Legs);
 
+public record CommodityLineResponse(
+    Guid Id, Guid LoadLegId, Guid CommodityId, decimal Quantity, Guid UnitOfMeasureId, int SequenceNo,
+    Guid SellCurrencyId, decimal SellRatePerUnit, decimal SellAmount,
+    Guid? BuyCurrencyId, decimal? BuyRatePerUnit, decimal? BuyAmount);
+
 /// <summary>
 /// Load capture, the leg-based status lifecycle, and the credit-limit hard stop
 /// (docs/architecture.html §5.1, §5.2, §5.4).
@@ -721,6 +726,44 @@ public class LoadsController : ControllerBase
         await creditLock.CommitAsync(ct);
 
         return CreatedAtAction(nameof(Get), new { id }, commodityLine);
+    }
+
+    /// <summary>
+    /// AddCommodityLine returns only the bare CommodityLine it just created (no rate
+    /// fields at all — those live on separate RateLine rows, §4.3), and GET /loads/{id}
+    /// never nests a leg's own CommodityLines either, so this was the only way to see
+    /// what's already on a leg after a page reload. Joins each CommodityLine back to its
+    /// own Sell (always present) and Buy (present only on a Subcontracted leg) RateLine
+    /// the same way Margin already aggregates them, just per-line instead of summed.
+    /// Internal staff only, the same restriction as Margin itself — a portal contact
+    /// never needs a rate breakdown, only the aggregate margin/accrual views §13
+    /// already exposes.
+    /// </summary>
+    [HttpGet("{id:guid}/legs/{legId:guid}/commodity-lines")]
+    public async Task<ActionResult<IEnumerable<CommodityLineResponse>>> ListCommodityLines(Guid id, Guid legId, CancellationToken ct)
+    {
+        if (_tenantContext.SubcontractorId is not null || _tenantContext.ClientId is not null) return Forbid();
+
+        if (!await _db.LoadLegs.AnyAsync(l => l.Id == legId && l.LoadId == id, ct))
+            return NotFound($"Leg {legId} was not found on load {id}.");
+
+        var lines = await _db.CommodityLines.Where(cl => cl.LoadLegId == legId).OrderBy(cl => cl.SequenceNo).ToListAsync(ct);
+        var lineIds = lines.Select(cl => cl.Id).ToList();
+        var rateLines = await _db.RateLines
+            .Where(r => r.SourceType == RateLineSourceType.CommodityLine && lineIds.Contains(r.SourceId))
+            .ToListAsync(ct);
+
+        var responses = lines.Select(cl =>
+        {
+            var sell = rateLines.First(r => r.SourceId == cl.Id && r.Direction == RateLineDirection.Sell);
+            var buy = rateLines.FirstOrDefault(r => r.SourceId == cl.Id && r.Direction == RateLineDirection.Buy);
+            return new CommodityLineResponse(
+                cl.Id, cl.LoadLegId, cl.CommodityId, cl.Quantity, cl.UnitOfMeasureId, cl.SequenceNo,
+                sell.CurrencyId, sell.RatePerUnit, sell.Amount,
+                buy?.CurrencyId, buy?.RatePerUnit, buy?.Amount);
+        });
+
+        return Ok(responses);
     }
 
     /// <summary>

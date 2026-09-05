@@ -1,5 +1,8 @@
 import { api } from './client'
-import type { AddLoadLegRequest, AllocateLoadLegRequest, CreateLoadRequest, Load, LoadLeg } from './types'
+import type {
+  AddCommodityLineRequest, AddLoadLegRequest, AllocateLoadLegRequest, CommodityLine, CreateLoadRequest,
+  Load, LoadLeg, LoadMargin,
+} from './types'
 
 export const loadsApi = {
   list: () => api.get<Load[]>('/loads'),
@@ -13,4 +16,9 @@ export const loadsApi = {
   hold: (loadId: string, reason: string) => api.post<void>(`/loads/${loadId}/hold`, { reason }),
   releaseHold: (loadId: string) => api.post<void>(`/loads/${loadId}/release-hold`),
   cancel: (loadId: string) => api.post<void>(`/loads/${loadId}/cancel`),
+  commodityLines: (loadId: string, legId: string) =>
+    api.get<CommodityLine[]>(`/loads/${loadId}/legs/${legId}/commodity-lines`),
+  addCommodityLine: (loadId: string, legId: string, request: AddCommodityLineRequest) =>
+    api.post<CommodityLine>(`/loads/${loadId}/legs/${legId}/commodity-lines`, request),
+  margin: (loadId: string) => api.get<LoadMargin>(`/loads/${loadId}/margin`),
 }

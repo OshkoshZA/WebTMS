@@ -1,5 +1,8 @@
 import { api } from './client'
-import type { Client, CostCentre, Currency, Driver, Location, LoadType, Subcontractor, Vehicle } from './types'
+import type {
+  Client, ClientCurrency, Commodity, CostCentre, Currency, Driver, Location, LoadType,
+  Subcontractor, SubcontractorCurrency, UnitOfMeasure, Vehicle,
+} from './types'
 
 // Read-only lookups feeding other screens' dropdowns — no create/edit here, that
 // belongs to each resource's own screen (clientsApi, for Client itself).
@@ -12,4 +15,9 @@ export const referenceApi = {
   drivers: () => api.get<Driver[]>('/drivers'),
   subcontractors: () => api.get<Subcontractor[]>('/subcontractors'),
   currencies: () => api.get<Currency[]>('/currencies'),
+  commodities: () => api.get<Commodity[]>('/commodities'),
+  unitsOfMeasure: () => api.get<UnitOfMeasure[]>('/units-of-measure'),
+  clientCurrencies: (clientId: string) => api.get<ClientCurrency[]>(`/clients/${clientId}/currencies`),
+  subcontractorCurrencies: (subcontractorId: string) =>
+    api.get<SubcontractorCurrency[]>(`/subcontractors/${subcontractorId}/currencies`),
 }
