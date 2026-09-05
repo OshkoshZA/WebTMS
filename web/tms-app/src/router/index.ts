@@ -15,6 +15,9 @@ export const router = createRouter({
     { path: '/vehicles', name: 'vehicles-list', component: () => import('../views/VehiclesListView.vue') },
     { path: '/vehicles/new', name: 'vehicles-new', component: () => import('../views/VehicleCreateView.vue') },
     { path: '/vehicles/:id', name: 'vehicles-detail', component: () => import('../views/VehicleDetailView.vue'), props: true },
+    { path: '/drivers', name: 'drivers-list', component: () => import('../views/DriversListView.vue') },
+    { path: '/drivers/new', name: 'drivers-new', component: () => import('../views/DriverCreateView.vue') },
+    { path: '/drivers/:id', name: 'drivers-detail', component: () => import('../views/DriverDetailView.vue'), props: true },
     { path: '/:pathMatch(.*)*', redirect: '/loads' },
   ],
 })

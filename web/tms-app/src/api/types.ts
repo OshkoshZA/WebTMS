@@ -177,7 +177,29 @@ export interface Driver {
   id: string
   employeeNo: string
   name: string
+  licenceCode: string
+  licenceExpiry: string | null
+  pdpExpiry: string | null
+  homeCostCentreId: string | null
   status: number // DRIVER_STATUS
+}
+
+export interface CreateDriverRequest {
+  employeeNo: string
+  name: string
+  licenceCode: string
+  licenceExpiry?: string
+  pdpExpiry?: string
+  homeCostCentreId?: string
+}
+
+export interface UpdateDriverRequest {
+  name: string
+  licenceCode: string
+  licenceExpiry?: string
+  pdpExpiry?: string
+  homeCostCentreId?: string
+  status: number
 }
 
 export interface Subcontractor {

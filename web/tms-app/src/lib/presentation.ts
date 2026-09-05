@@ -38,6 +38,12 @@ export function activeDeactivatedTone(status: number): Tone {
   return status === 0 ? 'success' : 'neutral'
 }
 
+// Driver's own three-state status (Active | OnLeave | Deactivated) — the one
+// master-data resource with a routine, reversible middle state (§11.5).
+export function driverStatusTone(status: number): Tone {
+  return status === 0 ? 'success' : status === 1 ? 'warning' : 'neutral'
+}
+
 export function formatMoney(amount: number, currencyCode: string): string {
   return `${amount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ${currencyCode}`
 }
