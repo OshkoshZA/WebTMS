@@ -17,6 +17,8 @@ export const ACTIVE_DEACTIVATED = ['Active', 'Deactivated'] as const
 
 export const DRIVER_STATUS = ['Active', 'OnLeave', 'Deactivated'] as const
 
+export const VEHICLE_TYPE = ['Horse', 'Trailer', 'Rigid'] as const
+
 export function label(values: readonly string[], value: number): string {
   return values[value] ?? `Unknown (${value})`
 }
@@ -151,9 +153,25 @@ export interface Vehicle {
   id: string
   fleetNo: string
   registration: string
-  type: number
+  type: number // VEHICLE_TYPE
+  make: string | null
+  model: string | null
+  licenceExpiry: string | null
+  vehicleTestExpiry: string | null
   status: number // ACTIVE_DEACTIVATED
 }
+
+export interface CreateVehicleRequest {
+  fleetNo: string
+  registration: string
+  type: number
+  make?: string
+  model?: string
+  licenceExpiry?: string
+  vehicleTestExpiry?: string
+}
+
+export type UpdateVehicleRequest = CreateVehicleRequest
 
 export interface Driver {
   id: string

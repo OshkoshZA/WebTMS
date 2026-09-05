@@ -12,6 +12,9 @@ export const router = createRouter({
     { path: '/clients', name: 'clients-list', component: () => import('../views/ClientsListView.vue') },
     { path: '/clients/new', name: 'clients-new', component: () => import('../views/ClientCreateView.vue') },
     { path: '/clients/:id', name: 'clients-detail', component: () => import('../views/ClientDetailView.vue'), props: true },
+    { path: '/vehicles', name: 'vehicles-list', component: () => import('../views/VehiclesListView.vue') },
+    { path: '/vehicles/new', name: 'vehicles-new', component: () => import('../views/VehicleCreateView.vue') },
+    { path: '/vehicles/:id', name: 'vehicles-detail', component: () => import('../views/VehicleDetailView.vue'), props: true },
     { path: '/:pathMatch(.*)*', redirect: '/loads' },
   ],
 })
