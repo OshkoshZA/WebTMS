@@ -206,5 +206,32 @@ export interface Subcontractor {
   id: string
   name: string
   registrationNo: string
+  currencyId: string
+  insuranceExpiry: string | null
+  bankingDetails: string | null
+  paymentTermsDays: number
   status: number // ACTIVE_DEACTIVATED
+}
+
+export interface SubcontractorCurrency {
+  id: string
+  subcontractorId: string
+  currencyId: string
+}
+
+export interface CreateSubcontractorRequest {
+  name: string
+  registrationNo: string
+  currencyId: string
+  insuranceExpiry?: string
+  bankingDetails?: string
+  paymentTermsDays: number
+}
+
+export interface UpdateSubcontractorRequest {
+  name: string
+  registrationNo: string
+  insuranceExpiry?: string
+  bankingDetails?: string
+  paymentTermsDays: number
 }

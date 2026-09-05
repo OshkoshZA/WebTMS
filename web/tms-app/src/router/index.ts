@@ -18,6 +18,9 @@ export const router = createRouter({
     { path: '/drivers', name: 'drivers-list', component: () => import('../views/DriversListView.vue') },
     { path: '/drivers/new', name: 'drivers-new', component: () => import('../views/DriverCreateView.vue') },
     { path: '/drivers/:id', name: 'drivers-detail', component: () => import('../views/DriverDetailView.vue'), props: true },
+    { path: '/subcontractors', name: 'subcontractors-list', component: () => import('../views/SubcontractorsListView.vue') },
+    { path: '/subcontractors/new', name: 'subcontractors-new', component: () => import('../views/SubcontractorCreateView.vue') },
+    { path: '/subcontractors/:id', name: 'subcontractors-detail', component: () => import('../views/SubcontractorDetailView.vue'), props: true },
     { path: '/:pathMatch(.*)*', redirect: '/loads' },
   ],
 })
