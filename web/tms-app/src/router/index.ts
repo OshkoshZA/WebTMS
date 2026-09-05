@@ -36,6 +36,8 @@ export const router = createRouter({
     { path: '/expense-types/:id', name: 'expense-types-detail', component: () => import('../views/ExpenseTypeDetailView.vue'), props: true },
     { path: '/load-types', name: 'load-types-list', component: () => import('../views/LoadTypesListView.vue') },
     { path: '/currencies', name: 'currencies-list', component: () => import('../views/CurrenciesListView.vue') },
+    { path: '/financial-calendar', name: 'financial-calendar', component: () => import('../views/FinancialCalendarView.vue') },
+    { path: '/exchange-rates', name: 'exchange-rates', component: () => import('../views/ExchangeRatesView.vue') },
     { path: '/exceptions', name: 'exceptions-list', component: () => import('../views/ExceptionsListView.vue') },
     { path: '/:pathMatch(.*)*', redirect: '/dashboard' },
   ],

@@ -31,6 +31,10 @@ export const CREDIT_NOTE_STATUS = ['Draft', 'Issued', 'Void'] as const
 
 export const CONFIRMATION_STATUS = ['Issued', 'Acknowledged', 'Declined'] as const
 
+export const FINANCIAL_YEAR_STATUS = ['Future', 'Open', 'Closed'] as const
+
+export const FINANCIAL_PERIOD_STATUS = ['Future', 'Open', 'Closed'] as const
+
 export function label(values: readonly string[], value: number): string {
   return values[value] ?? `Unknown (${value})`
 }
@@ -388,6 +392,59 @@ export interface SubcontractorLeg {
   buyAmount: number
   buyCurrencyId: string | null
   confirmation: LoadConfirmation | null
+}
+
+export interface FinancialPeriod {
+  id: string
+  periodNumber: number
+  name: string
+  startDate: string
+  endDate: string
+  status: number // FINANCIAL_PERIOD_STATUS
+  closedAt: string | null
+}
+
+export interface FinancialYear {
+  id: string
+  yearLabel: string
+  startDate: string
+  endDate: string
+  status: number // FINANCIAL_YEAR_STATUS
+  periods: FinancialPeriod[]
+}
+
+export interface CreateFinancialYearRequest {
+  yearLabel: string
+  startDate: string
+  endDate: string
+  periodCount?: number
+}
+
+export interface DebtorsAgingSnapshot {
+  id: string
+  clientId: string
+  currentAmount: number
+  days30: number
+  days60: number
+  days90: number
+  days90Plus: number
+  totalOutstanding: number
+  snapshotDate: string
+}
+
+export interface ExchangeRate {
+  id: string
+  fromCurrencyId: string
+  toCurrencyId: string
+  effectiveDate: string
+  rate: number
+}
+
+export interface CaptureExchangeRateRequest {
+  fromCurrencyId: string
+  toCurrencyId: string
+  effectiveDate: string
+  rate: number
 }
 
 export interface ExceptionRecord {

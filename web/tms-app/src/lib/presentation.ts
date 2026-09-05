@@ -64,6 +64,12 @@ export function confirmationStatusTone(status: number): Tone {
   return status === 0 ? 'warning' : status === 1 ? 'success' : 'danger'
 }
 
+// Shared by FinancialYear and FinancialPeriod — the identical Future/Open/Closed
+// lifecycle (§10.3).
+export function financialCalendarStatusTone(status: number): Tone {
+  return status === 0 ? 'neutral' : status === 1 ? 'success' : 'info'
+}
+
 export function formatMoney(amount: number, currencyCode: string): string {
   return `${amount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ${currencyCode}`
 }
