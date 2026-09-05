@@ -447,6 +447,60 @@ export interface CaptureExchangeRateRequest {
   rate: number
 }
 
+export interface Company {
+  id: string
+  legalName: string
+  tradingName: string | null
+}
+
+export interface AppFunction {
+  id: string
+  code: string
+  description: string
+}
+
+export interface Role {
+  id: string
+  name: string
+  functions: AppFunction[]
+}
+
+export interface CreateRoleRequest {
+  name: string
+}
+
+export interface UserCompanyRole {
+  id: string
+  companyId: string
+  roleId: string
+  roleName: string
+}
+
+export interface User {
+  id: string
+  email: string
+  displayName: string
+  status: number // ACTIVE_DEACTIVATED
+  companyRoles: UserCompanyRole[]
+}
+
+export interface CreateUserRequest {
+  email: string
+  password: string
+  displayName: string
+  initialCompanyId?: string
+  initialRoleId?: string
+}
+
+export interface UpdateUserRequest {
+  displayName: string
+}
+
+export interface AddCompanyRoleRequest {
+  companyId: string
+  roleId: string
+}
+
 export interface ExceptionRecord {
   id: string
   category: string

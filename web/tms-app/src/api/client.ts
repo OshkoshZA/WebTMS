@@ -95,4 +95,5 @@ export const api = {
   get: <T>(path: string): Promise<T> => request<T>('GET', path, undefined, false),
   post: <T>(path: string, body?: unknown): Promise<T> => request<T>('POST', path, body ?? {}, false),
   put: <T>(path: string, body?: unknown): Promise<T> => request<T>('PUT', path, body ?? {}, false),
+  delete: <T>(path: string): Promise<T> => request<T>('DELETE', path, undefined, false),
 }

@@ -1,6 +1,6 @@
 import { api } from './client'
 import type {
-  Client, ClientCurrency, Commodity, Country, CostCentre, Currency, Driver, ExpenseType, Location, LoadType,
+  Client, ClientCurrency, Commodity, Company, Country, CostCentre, Currency, Driver, ExpenseType, Location, LoadType,
   Subcontractor, SubcontractorCurrency, UnitOfMeasure, Vehicle,
 } from './types'
 
@@ -8,6 +8,7 @@ import type {
 // belongs to each resource's own screen (clientsApi, for Client itself).
 export const referenceApi = {
   clients: () => api.get<Client[]>('/clients'),
+  companies: () => api.get<Company[]>('/companies'),
   loadTypes: () => api.get<LoadType[]>('/load-types'),
   locations: () => api.get<Location[]>('/locations'),
   costCentres: () => api.get<CostCentre[]>('/cost-centres'),
