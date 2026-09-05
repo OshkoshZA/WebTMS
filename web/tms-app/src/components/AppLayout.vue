@@ -17,7 +17,10 @@ async function logout() {
       <div class="mx-auto flex max-w-6xl items-center justify-between px-6 py-3">
         <div class="flex items-center gap-6">
           <span class="text-lg font-semibold text-slate-900">TMS</span>
-          <nav class="flex gap-4 text-sm">
+          <nav class="flex flex-wrap gap-4 text-sm">
+            <router-link to="/dashboard" class="text-slate-600 hover:text-slate-900" active-class="font-semibold text-slate-900">
+              Dashboard
+            </router-link>
             <router-link to="/loads" class="text-slate-600 hover:text-slate-900" active-class="font-semibold text-slate-900">
               Loads
             </router-link>
@@ -35,6 +38,9 @@ async function logout() {
             </router-link>
             <router-link to="/cost-centres" class="text-slate-600 hover:text-slate-900" active-class="font-semibold text-slate-900">
               Cost centres
+            </router-link>
+            <router-link to="/exceptions" class="text-slate-600 hover:text-slate-900" active-class="font-semibold text-slate-900">
+              Exceptions
             </router-link>
           </nav>
         </div>

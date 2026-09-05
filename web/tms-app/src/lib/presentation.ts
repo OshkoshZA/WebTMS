@@ -44,6 +44,14 @@ export function driverStatusTone(status: number): Tone {
   return status === 0 ? 'success' : status === 1 ? 'warning' : 'neutral'
 }
 
+export function exceptionSeverityTone(severity: number): Tone {
+  return severity === 2 ? 'danger' : severity === 1 ? 'warning' : 'info'
+}
+
+export function exceptionStatusTone(status: number): Tone {
+  return status === 0 ? 'danger' : status === 1 ? 'warning' : 'success'
+}
+
 export function formatMoney(amount: number, currencyCode: string): string {
   return `${amount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ${currencyCode}`
 }
