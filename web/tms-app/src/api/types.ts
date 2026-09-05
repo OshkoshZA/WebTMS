@@ -25,6 +25,12 @@ export const EXCEPTION_STATUS = ['Open', 'Acknowledged', 'Resolved'] as const
 
 export const COMMODITY_CATEGORY = ['Fuel', 'BulkLiquid', 'DryBulk', 'BreakBulk', 'General'] as const
 
+export const INVOICE_STATUS = ['Draft', 'Issued', 'PartPaid', 'Paid', 'Void'] as const
+
+export const CREDIT_NOTE_STATUS = ['Draft', 'Issued', 'Void'] as const
+
+export const CONFIRMATION_STATUS = ['Issued', 'Acknowledged', 'Declined'] as const
+
 export function label(values: readonly string[], value: number): string {
   return values[value] ?? `Unknown (${value})`
 }
@@ -311,6 +317,77 @@ export interface UpdateSubcontractorRequest {
   insuranceExpiry?: string
   bankingDetails?: string
   paymentTermsDays: number
+}
+
+export interface InvoiceLine {
+  id: string
+  rateLineSellId: string
+  description: string
+  quantity: number
+  unitOfMeasureId: string
+  rate: number
+  amount: number
+}
+
+export interface Invoice {
+  id: string
+  invoiceNumber: string
+  clientId: string
+  currencyId: string
+  financialPeriodId: string
+  issueDate: string
+  dueDate: string
+  status: number // INVOICE_STATUS
+  totalExVat: number
+  vatAmount: number
+  totalIncVat: number
+  isOverdue: boolean
+  lines: InvoiceLine[]
+}
+
+export interface CreditNoteLine {
+  id: string
+  invoiceLineId: string | null
+  description: string
+  amount: number
+}
+
+export interface CreditNote {
+  id: string
+  creditNoteNumber: string
+  clientId: string
+  originalInvoiceId: string | null
+  currencyId: string
+  financialPeriodId: string
+  reason: string
+  issueDate: string
+  status: number // CREDIT_NOTE_STATUS
+  totalAmount: number
+  pdfUrl: string | null
+  lines: CreditNoteLine[]
+}
+
+export interface LoadConfirmation {
+  id: string
+  loadLegId: string
+  subcontractorId: string
+  documentNumber: string
+  issuedDate: string
+  status: number // CONFIRMATION_STATUS
+  pdfUrl: string | null
+  declineReason: string | null
+}
+
+export interface SubcontractorLeg {
+  id: string
+  loadId: string
+  sequenceNo: number
+  originLocationId: string
+  destinationLocationId: string
+  status: number // LOAD_LEG_STATUS
+  buyAmount: number
+  buyCurrencyId: string | null
+  confirmation: LoadConfirmation | null
 }
 
 export interface ExceptionRecord {

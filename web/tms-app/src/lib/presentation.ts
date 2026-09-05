@@ -52,8 +52,25 @@ export function exceptionStatusTone(status: number): Tone {
   return status === 0 ? 'danger' : status === 1 ? 'warning' : 'success'
 }
 
+export function invoiceStatusTone(status: number): Tone {
+  return status === 0 ? 'neutral' : status === 1 ? 'info' : status === 2 ? 'warning' : status === 3 ? 'success' : 'neutral'
+}
+
+export function creditNoteStatusTone(status: number): Tone {
+  return status === 0 ? 'neutral' : status === 1 ? 'info' : 'neutral'
+}
+
+export function confirmationStatusTone(status: number): Tone {
+  return status === 0 ? 'warning' : status === 1 ? 'success' : 'danger'
+}
+
 export function formatMoney(amount: number, currencyCode: string): string {
   return `${amount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ${currencyCode}`
+}
+
+export function formatDate(value: string | null): string {
+  if (!value) return '—'
+  return new Date(value).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' })
 }
 
 export function formatDateTime(value: string | null): string {

@@ -7,8 +7,11 @@ import { subcontractorsApi } from '../api/subcontractors'
 import { referenceApi } from '../api/reference'
 import { ApiError } from '../api/client'
 import { useAuthStore } from '../stores/auth'
-import { ACTIVE_DEACTIVATED, label, type Currency, type Subcontractor, type SubcontractorCurrency } from '../api/types'
-import { activeDeactivatedTone } from '../lib/presentation'
+import {
+  ACTIVE_DEACTIVATED, CONFIRMATION_STATUS, LOAD_LEG_STATUS, label,
+  type Currency, type Location, type Subcontractor, type SubcontractorCurrency, type SubcontractorLeg,
+} from '../api/types'
+import { activeDeactivatedTone, confirmationStatusTone, formatMoney, loadLegStatusTone } from '../lib/presentation'
 
 const props = defineProps<{ id: string }>()
 const auth = useAuthStore()
@@ -16,6 +19,8 @@ const auth = useAuthStore()
 const subcontractor = ref<Subcontractor | null>(null)
 const currencies = ref<Currency[]>([])
 const subcontractorCurrencies = ref<SubcontractorCurrency[]>([])
+const legs = ref<SubcontractorLeg[]>([])
+const locations = ref<Location[]>([])
 
 const loading = ref(true)
 const error = ref('')
@@ -24,10 +29,15 @@ const actionBusy = ref(false)
 
 const canManage = computed(() => auth.hasFunction('subcontractor.master.manage'))
 
-function currencyCode(currencyId: string): string {
+function currencyCode(currencyId: string | null): string {
+  if (!currencyId) return ''
   return currencies.value.find((c) => c.id === currencyId)?.code ?? currencyId
 }
 const primaryCurrencyCode = computed(() => (subcontractor.value ? currencyCode(subcontractor.value.currencyId) : ''))
+function locationName(id: string): string {
+  return locations.value.find((l) => l.id === id)?.name ?? id
+}
+const sortedLegs = computed(() => legs.value.slice().sort((a, b) => a.sequenceNo - b.sequenceNo))
 
 // Every currency not already the primary and not already on the subcontractor's own
 // allow-list — AddCurrency's own duplicate checks, mirrored here so the dropdown
@@ -42,10 +52,17 @@ async function loadEverything() {
   loading.value = true
   error.value = ''
   try {
-    const [subcontractorData, currencyList] = await Promise.all([subcontractorsApi.get(props.id), referenceApi.currencies()])
+    const [subcontractorData, currencyList, locationList] = await Promise.all([
+      subcontractorsApi.get(props.id),
+      referenceApi.currencies(),
+      referenceApi.locations(),
+    ])
     subcontractor.value = subcontractorData
     currencies.value = currencyList
-    subcontractorCurrencies.value = await subcontractorsApi.currencies(props.id)
+    locations.value = locationList
+    const [currencyRows, legList] = await Promise.all([subcontractorsApi.currencies(props.id), subcontractorsApi.legs(props.id)])
+    subcontractorCurrencies.value = currencyRows
+    legs.value = legList
   } catch (e) {
     error.value = e instanceof ApiError ? e.message : 'Could not load this subcontractor.'
   } finally {
@@ -242,6 +259,38 @@ function submitAddCurrency() {
             </tr>
             <tr v-if="subcontractorCurrencies.length === 0">
               <td class="px-4 py-6 text-center text-slate-500">No additional currencies.</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h2 class="mt-8 text-lg font-semibold text-slate-900">Allocated legs</h2>
+      <p v-if="sortedLegs.length === 0" class="mt-3 text-sm text-slate-500">No legs allocated to this subcontractor yet.</p>
+      <div v-else class="mt-3 overflow-x-auto rounded-lg border border-slate-200 bg-white">
+        <table class="w-full text-left text-sm">
+          <thead class="border-b border-slate-200 bg-slate-50 text-xs uppercase tracking-wide text-slate-500">
+            <tr>
+              <th class="px-4 py-3">#</th>
+              <th class="px-4 py-3">Route</th>
+              <th class="px-4 py-3">Status</th>
+              <th class="px-4 py-3">Buy amount</th>
+              <th class="px-4 py-3">Confirmation</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="leg in sortedLegs" :key="leg.id" class="border-b border-slate-100 last:border-0">
+              <td class="px-4 py-3 text-slate-600">{{ leg.sequenceNo }}</td>
+              <td class="px-4 py-3 text-slate-900">{{ locationName(leg.originLocationId) }} → {{ locationName(leg.destinationLocationId) }}</td>
+              <td class="px-4 py-3"><StatusBadge :text="label(LOAD_LEG_STATUS, leg.status)" :tone="loadLegStatusTone(leg.status)" /></td>
+              <td class="px-4 py-3 text-slate-600">{{ formatMoney(leg.buyAmount, currencyCode(leg.buyCurrencyId)) }}</td>
+              <td class="px-4 py-3">
+                <StatusBadge
+                  v-if="leg.confirmation"
+                  :text="label(CONFIRMATION_STATUS, leg.confirmation.status)"
+                  :tone="confirmationStatusTone(leg.confirmation.status)"
+                />
+                <span v-else class="text-slate-400">—</span>
+              </td>
             </tr>
           </tbody>
         </table>

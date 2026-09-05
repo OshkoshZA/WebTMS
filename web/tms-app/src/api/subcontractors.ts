@@ -1,5 +1,5 @@
 import { api } from './client'
-import type { CreateSubcontractorRequest, Subcontractor, SubcontractorCurrency, UpdateSubcontractorRequest } from './types'
+import type { CreateSubcontractorRequest, Subcontractor, SubcontractorCurrency, SubcontractorLeg, UpdateSubcontractorRequest } from './types'
 
 export const subcontractorsApi = {
   list: () => api.get<Subcontractor[]>('/subcontractors'),
@@ -11,4 +11,5 @@ export const subcontractorsApi = {
   currencies: (id: string) => api.get<SubcontractorCurrency[]>(`/subcontractors/${id}/currencies`),
   addCurrency: (id: string, currencyId: string) =>
     api.post<SubcontractorCurrency>(`/subcontractors/${id}/currencies`, { currencyId }),
+  legs: (id: string) => api.get<SubcontractorLeg[]>(`/subcontractors/${id}/legs`),
 }

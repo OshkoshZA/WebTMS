@@ -7,8 +7,11 @@ import { clientsApi } from '../api/clients'
 import { referenceApi } from '../api/reference'
 import { ApiError } from '../api/client'
 import { useAuthStore } from '../stores/auth'
-import { ACTIVE_DEACTIVATED, label, type Client, type ClientCurrency, type CreditStatus, type Currency } from '../api/types'
-import { activeDeactivatedTone, formatMoney } from '../lib/presentation'
+import {
+  ACTIVE_DEACTIVATED, CREDIT_NOTE_STATUS, INVOICE_STATUS, label,
+  type Client, type ClientCurrency, type CreditNote, type CreditStatus, type Currency, type Invoice,
+} from '../api/types'
+import { activeDeactivatedTone, creditNoteStatusTone, formatDate, formatMoney, invoiceStatusTone } from '../lib/presentation'
 
 const props = defineProps<{ id: string }>()
 const auth = useAuthStore()
@@ -17,6 +20,10 @@ const client = ref<Client | null>(null)
 const currencies = ref<Currency[]>([])
 const clientCurrencies = ref<ClientCurrency[]>([])
 const creditStatus = ref<CreditStatus | null>(null)
+const invoices = ref<Invoice[]>([])
+const creditNotes = ref<CreditNote[]>([])
+const expandedInvoiceId = ref<string | null>(null)
+const expandedCreditNoteId = ref<string | null>(null)
 
 const loading = ref(true)
 const error = ref('')
@@ -47,12 +54,16 @@ async function loadEverything() {
     const [clientData, currencyList] = await Promise.all([clientsApi.get(props.id), referenceApi.currencies()])
     client.value = clientData
     currencies.value = currencyList
-    const [statusData, currencyRows] = await Promise.all([
+    const [statusData, currencyRows, invoiceList, creditNoteList] = await Promise.all([
       clientsApi.creditStatus(props.id),
       clientsApi.currencies(props.id),
+      clientsApi.invoices(props.id),
+      clientsApi.creditNotes(props.id),
     ])
     creditStatus.value = statusData
     clientCurrencies.value = currencyRows
+    invoices.value = invoiceList
+    creditNotes.value = creditNoteList
   } catch (e) {
     error.value = e instanceof ApiError ? e.message : 'Could not load this client.'
   } finally {
@@ -303,6 +314,113 @@ function submitEditCurrency(currencyId: string) {
             <tr v-if="clientCurrencies.length === 0">
               <td :colspan="canChangeCurrency ? 3 : 2" class="px-4 py-6 text-center text-slate-500">No additional currencies.</td>
             </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h2 class="mt-8 text-lg font-semibold text-slate-900">Invoices</h2>
+      <p v-if="invoices.length === 0" class="mt-3 text-sm text-slate-500">No invoices yet.</p>
+      <div v-else class="mt-3 overflow-x-auto rounded-lg border border-slate-200 bg-white">
+        <table class="w-full text-left text-sm">
+          <thead class="border-b border-slate-200 bg-slate-50 text-xs uppercase tracking-wide text-slate-500">
+            <tr>
+              <th class="px-4 py-3">Invoice no.</th>
+              <th class="px-4 py-3">Issue date</th>
+              <th class="px-4 py-3">Due date</th>
+              <th class="px-4 py-3">Total inc. VAT</th>
+              <th class="px-4 py-3">Status</th>
+            </tr>
+          </thead>
+          <tbody>
+            <template v-for="invoice in invoices" :key="invoice.id">
+              <tr
+                class="cursor-pointer border-b border-slate-100 last:border-0 hover:bg-slate-50"
+                @click="expandedInvoiceId = expandedInvoiceId === invoice.id ? null : invoice.id"
+              >
+                <td class="px-4 py-3 font-medium text-slate-900">{{ invoice.invoiceNumber }}</td>
+                <td class="px-4 py-3 text-slate-600">{{ formatDate(invoice.issueDate) }}</td>
+                <td class="px-4 py-3 text-slate-600">{{ formatDate(invoice.dueDate) }}</td>
+                <td class="px-4 py-3 text-slate-600">{{ formatMoney(invoice.totalIncVat, currencyCode(invoice.currencyId)) }}</td>
+                <td class="px-4 py-3">
+                  <div class="flex gap-2">
+                    <StatusBadge :text="label(INVOICE_STATUS, invoice.status)" :tone="invoiceStatusTone(invoice.status)" />
+                    <StatusBadge v-if="invoice.isOverdue" text="Overdue" tone="danger" />
+                  </div>
+                </td>
+              </tr>
+              <tr v-if="expandedInvoiceId === invoice.id" class="border-b border-slate-100 bg-slate-50 last:border-0">
+                <td colspan="5" class="px-4 py-3">
+                  <table class="w-full text-left text-sm">
+                    <thead class="text-xs uppercase tracking-wide text-slate-500">
+                      <tr>
+                        <th class="py-1 pr-4">Description</th>
+                        <th class="py-1 pr-4">Quantity</th>
+                        <th class="py-1 pr-4">Rate</th>
+                        <th class="py-1">Amount</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <tr v-for="line in invoice.lines" :key="line.id">
+                        <td class="py-1 pr-4 text-slate-700">{{ line.description }}</td>
+                        <td class="py-1 pr-4 text-slate-600">{{ line.quantity }}</td>
+                        <td class="py-1 pr-4 text-slate-600">{{ formatMoney(line.rate, currencyCode(invoice.currencyId)) }}</td>
+                        <td class="py-1 text-slate-600">{{ formatMoney(line.amount, currencyCode(invoice.currencyId)) }}</td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </td>
+              </tr>
+            </template>
+          </tbody>
+        </table>
+      </div>
+
+      <h2 class="mt-8 text-lg font-semibold text-slate-900">Credit notes</h2>
+      <p v-if="creditNotes.length === 0" class="mt-3 text-sm text-slate-500">No credit notes yet.</p>
+      <div v-else class="mt-3 overflow-x-auto rounded-lg border border-slate-200 bg-white">
+        <table class="w-full text-left text-sm">
+          <thead class="border-b border-slate-200 bg-slate-50 text-xs uppercase tracking-wide text-slate-500">
+            <tr>
+              <th class="px-4 py-3">Credit note no.</th>
+              <th class="px-4 py-3">Issue date</th>
+              <th class="px-4 py-3">Reason</th>
+              <th class="px-4 py-3">Total</th>
+              <th class="px-4 py-3">Status</th>
+            </tr>
+          </thead>
+          <tbody>
+            <template v-for="creditNote in creditNotes" :key="creditNote.id">
+              <tr
+                class="cursor-pointer border-b border-slate-100 last:border-0 hover:bg-slate-50"
+                @click="expandedCreditNoteId = expandedCreditNoteId === creditNote.id ? null : creditNote.id"
+              >
+                <td class="px-4 py-3 font-medium text-slate-900">{{ creditNote.creditNoteNumber }}</td>
+                <td class="px-4 py-3 text-slate-600">{{ formatDate(creditNote.issueDate) }}</td>
+                <td class="px-4 py-3 text-slate-600">{{ creditNote.reason }}</td>
+                <td class="px-4 py-3 text-slate-600">{{ formatMoney(creditNote.totalAmount, currencyCode(creditNote.currencyId)) }}</td>
+                <td class="px-4 py-3">
+                  <StatusBadge :text="label(CREDIT_NOTE_STATUS, creditNote.status)" :tone="creditNoteStatusTone(creditNote.status)" />
+                </td>
+              </tr>
+              <tr v-if="expandedCreditNoteId === creditNote.id" class="border-b border-slate-100 bg-slate-50 last:border-0">
+                <td colspan="5" class="px-4 py-3">
+                  <table class="w-full text-left text-sm">
+                    <thead class="text-xs uppercase tracking-wide text-slate-500">
+                      <tr>
+                        <th class="py-1 pr-4">Description</th>
+                        <th class="py-1">Amount</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <tr v-for="line in creditNote.lines" :key="line.id">
+                        <td class="py-1 pr-4 text-slate-700">{{ line.description }}</td>
+                        <td class="py-1 text-slate-600">{{ formatMoney(line.amount, currencyCode(creditNote.currencyId)) }}</td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </td>
+              </tr>
+            </template>
           </tbody>
         </table>
       </div>

@@ -1,5 +1,5 @@
 import { api } from './client'
-import type { Client, ClientCurrency, CreateClientRequest, CreditStatus, UpdateClientRequest } from './types'
+import type { Client, ClientCurrency, CreateClientRequest, CreditNote, CreditStatus, Invoice, UpdateClientRequest } from './types'
 
 export const clientsApi = {
   list: () => api.get<Client[]>('/clients'),
@@ -15,4 +15,8 @@ export const clientsApi = {
     api.post<ClientCurrency>(`/clients/${id}/currencies`, { currencyId, creditLimit }),
   updateCurrency: (id: string, currencyId: string, creditLimit: number) =>
     api.put<void>(`/clients/${id}/currencies/${currencyId}`, { creditLimit }),
+  // Staff never has Draft filtered out — that's a portal-only restriction
+  // (InvoicesController/CreditNotesController's own Draft-visibility rule).
+  invoices: (id: string) => api.get<Invoice[]>(`/clients/${id}/invoices`),
+  creditNotes: (id: string) => api.get<CreditNote[]>(`/clients/${id}/credit-notes`),
 }
