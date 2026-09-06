@@ -190,17 +190,28 @@ public class FinancialPeriodsController : ControllerBase
         return await _db.FinancialPeriods.FirstOrDefaultAsync(p => p.FinancialYearId == nextYear.Id && p.PeriodNumber == 1, ct);
     }
 
-    /// <summary>Rolls every Client's aged-debtors bucket forward one step (§10.3: Current->30->60->90->90+, 90+ stays).</summary>
+    /// <summary>
+    /// Rolls every Client's aged-debtors bucket forward one step (§10.3: Current->30->60->90->90+, 90+ stays).
+    /// Fetches every relevant client's most recent snapshot in one round trip rather than one
+    /// query per client — with this company's Clients table now numbering in the thousands, the
+    /// old per-client loop held the period-claiming transaction's locks for long enough that a
+    /// second, concurrent Close request's own read could hit its command timeout and surface as a
+    /// raw 500 instead of the clean 409 Conflict the atomic claim above is meant to guarantee it.
+    /// </summary>
     private async Task WriteDebtorsAgingSnapshotsAsync(FinancialPeriod closingPeriod, CancellationToken ct)
     {
         var clientIds = await _db.Clients.Select(c => c.Id).ToListAsync(ct);
 
+        var priorByClient = (await _db.DebtorsAgingSnapshots
+                .Where(s => clientIds.Contains(s.ClientId))
+                .Select(s => new { s.ClientId, s.SnapshotDate, s.CurrentAmount, s.Days30, s.Days60, s.Days90, s.Days90Plus })
+                .ToListAsync(ct))
+            .GroupBy(s => s.ClientId)
+            .ToDictionary(g => g.Key, g => g.OrderByDescending(s => s.SnapshotDate).First());
+
         foreach (var clientId in clientIds)
         {
-            var prior = await _db.DebtorsAgingSnapshots
-                .Where(s => s.ClientId == clientId)
-                .OrderByDescending(s => s.SnapshotDate)
-                .FirstOrDefaultAsync(ct);
+            priorByClient.TryGetValue(clientId, out var prior);
 
             // TODO (§10.1): "new Current" is the sum of invoices raised in the period
             // just closed — 0 until Invoice exists. See the class doc comment on
