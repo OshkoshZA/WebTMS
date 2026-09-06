@@ -83,6 +83,14 @@ export const DSR_STATUS = ['Received', 'InProgress', 'Fulfilled', 'Rejected'] as
 
 export const AUDIT_ACTION = ['Create', 'Update', 'Delete', 'StatusChange', 'Approve', 'Override'] as const
 
+export const DEBRIEF_STATUS = ['PendingReview', 'Approved'] as const
+
+export const INCIDENT_TYPE = ['Delay', 'Damage', 'Breakdown'] as const
+
+export const INCIDENT_SEVERITY = ['Info', 'Warning', 'Critical'] as const
+
+export const CLAIMED_AGAINST = ['Company', 'SubcontractorAccrual'] as const
+
 export function label(values: readonly string[], value: number): string {
   return values[value] ?? `Unknown (${value})`
 }
@@ -698,6 +706,46 @@ export interface AuditEntry {
   oldValueJson: string | null
   newValueJson: string | null
   reason: string | null
+}
+
+export interface DebriefIncident {
+  id: string
+  type: number // INCIDENT_TYPE
+  severity: number // INCIDENT_SEVERITY
+  narrative: string
+}
+
+export interface DebriefExpense {
+  id: string
+  expenseTypeId: string
+  description: string
+  amount: number
+  currencyId: string
+  receiptImageUrl: string | null
+  claimedAgainst: number // CLAIMED_AGAINST
+  accrualId: string | null
+}
+
+export interface Debrief {
+  id: string
+  loadLegId: string
+  driverId: string | null
+  vehicleId: string | null
+  odometerStart: number | null
+  odometerEnd: number | null
+  fuelLitres: number | null
+  fuelCost: number | null
+  drivingHours: number | null
+  podReceived: boolean
+  podImageUrl: string | null
+  submittedAt: string
+  status: number // DEBRIEF_STATUS
+  exceptionReasons: string | null
+  resolvedByUserId: string | null
+  resolvedAt: string | null
+  resolutionNote: string | null
+  incidents: DebriefIncident[]
+  expenses: DebriefExpense[]
 }
 
 export interface ExceptionRecord {

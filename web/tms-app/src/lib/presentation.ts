@@ -91,6 +91,14 @@ export function dsrStatusTone(status: number): Tone {
   return status === 0 ? 'warning' : status === 1 ? 'info' : status === 2 ? 'success' : 'danger'
 }
 
+export function debriefStatusTone(status: number): Tone {
+  return status === 0 ? 'warning' : 'success'
+}
+
+export function incidentSeverityTone(severity: number): Tone {
+  return severity === 2 ? 'danger' : severity === 1 ? 'warning' : 'info'
+}
+
 export function formatMoney(amount: number, currencyCode: string): string {
   return `${amount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ${currencyCode}`
 }
