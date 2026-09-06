@@ -81,6 +81,14 @@ async function logout() {
             <router-link to="/data-subject-requests" class="text-slate-600 hover:text-slate-900" active-class="font-semibold text-slate-900">
               Data subject requests
             </router-link>
+            <router-link
+              v-if="auth.hasFunction('audit.view')"
+              to="/audit-trail"
+              class="text-slate-600 hover:text-slate-900"
+              active-class="font-semibold text-slate-900"
+            >
+              Audit trail
+            </router-link>
             <router-link to="/exceptions" class="text-slate-600 hover:text-slate-900" active-class="font-semibold text-slate-900">
               Exceptions
             </router-link>

@@ -81,6 +81,8 @@ export const DSR_REQUEST_TYPE = ['Access', 'Rectification', 'Erasure', 'Portabil
 // so no UI action here ever targets it, only Received/Fulfilled/Rejected are reachable.
 export const DSR_STATUS = ['Received', 'InProgress', 'Fulfilled', 'Rejected'] as const
 
+export const AUDIT_ACTION = ['Create', 'Update', 'Delete', 'StatusChange', 'Approve', 'Override'] as const
+
 export function label(values: readonly string[], value: number): string {
   return values[value] ?? `Unknown (${value})`
 }
@@ -659,6 +661,20 @@ export interface CreateDataSubjectRequestRequest {
   subjectType: number
   subjectId: string
   requestType: number
+}
+
+export interface AuditEntry {
+  id: string
+  companyId: string | null
+  entityType: string
+  entityId: string
+  action: number // AUDIT_ACTION
+  changedByUserId: string | null
+  changedByApiClientId: string | null
+  changedAtUtc: string
+  oldValueJson: string | null
+  newValueJson: string | null
+  reason: string | null
 }
 
 export interface ExceptionRecord {
