@@ -32,19 +32,21 @@ builder.Services.AddScoped<Tms.Api.Services.CreditExposureService>();
 builder.Services.AddScoped<Tms.Api.Services.LoadStatusService>();
 builder.Services.AddScoped<Tms.Api.Services.DebriefApprovalService>();
 builder.Services.AddScoped<Tms.Api.Services.ExceptionService>();
+builder.Services.AddScoped<Tms.Api.Services.ComplianceReconciliationService>();
 builder.Services.AddScoped<Tms.Api.Services.WebhookPublisher>();
 builder.Services.AddScoped<Tms.Api.Services.WebhookDeliveryService>();
 builder.Services.AddHttpClient("webhooks", client => client.Timeout = TimeSpan.FromSeconds(10));
 
 // --- Background jobs (§11.3): a plain BackgroundService/PeriodicTimer, not a new
-// dependency — this app has exactly one scheduled sweep today. Disabled in
-// Tms.Api.Tests (TestApiFactory) so no test run races a scheduled tick against the
-// same rows a test is asserting on; WebhookRetryJob itself stays callable directly
-// for tests that want to exercise the sweep logic on demand instead. ---
+// dependency. Disabled in Tms.Api.Tests (TestApiFactory) so no test run races a
+// scheduled tick against the same rows a test is asserting on; each job class stays
+// callable directly for tests that want to exercise the sweep logic on demand instead. ---
 builder.Services.AddSingleton<Tms.Api.Services.WebhookRetryJob>();
+builder.Services.AddSingleton<Tms.Api.Services.ComplianceReconcileJob>();
 if (builder.Configuration.GetValue("BackgroundJobs:Enabled", true))
 {
     builder.Services.AddHostedService<Tms.Api.Services.WebhookRetryHostedService>();
+    builder.Services.AddHostedService<Tms.Api.Services.ComplianceReconcileHostedService>();
 }
 
 // --- Database (§4.1: EF Core global query filters are the application-layer half of

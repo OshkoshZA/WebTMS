@@ -6,8 +6,9 @@ namespace Tms.Api.Tests;
 
 /// <summary>
 /// Vehicle/driver compliance expiry wired into the shared Exception mechanism (§16.1)
-/// via ComplianceController.ReconcileExceptions — the third of Fig. 13's six sources,
-/// run on demand rather than on a schedule this codebase has no job framework to run.
+/// via ComplianceController.ReconcileExceptions — the third of Fig. 13's six sources.
+/// Exercises the on-demand path; ComplianceReconcileJobTests covers the scheduled sweep
+/// (§11.3), both sharing the same ComplianceReconciliationService underneath.
 /// </summary>
 [Collection(StaffTestCollection.Name)]
 public class ComplianceExceptionTests
