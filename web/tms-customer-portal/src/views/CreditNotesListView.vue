@@ -39,6 +39,7 @@ onMounted(async () => {
 <template>
   <AppLayout>
     <h1 class="text-xl font-semibold text-slate-900">Credit notes</h1>
+    <p class="mt-1 text-sm text-slate-500">PDF download isn't available yet — no document-rendering pipeline exists for this yet.</p>
 
     <ErrorAlert v-if="error" :message="error" class="mt-4" />
     <p v-else-if="loading" class="mt-6 text-sm text-slate-500">Loading…</p>

@@ -17,6 +17,18 @@ export function loadStatusTone(status: number): Tone {
   return LOAD_STATUS_TONE[status] ?? 'neutral'
 }
 
+const LOAD_LEG_STATUS_TONE: Record<number, Tone> = {
+  0: 'neutral', // Planned
+  1: 'info', // Allocated
+  2: 'info', // InTransit
+  3: 'success', // Delivered
+  4: 'success', // PodReceived
+}
+
+export function loadLegStatusTone(status: number): Tone {
+  return LOAD_LEG_STATUS_TONE[status] ?? 'neutral'
+}
+
 const INVOICE_STATUS_TONE: Record<number, Tone> = {
   0: 'neutral', // Draft
   1: 'info', // Issued

@@ -185,7 +185,7 @@ function toggleActive() {
           </select>
         </label>
         <div class="col-span-2 flex gap-3">
-          <button type="submit" :disabled="actionBusy" class="rounded-md bg-slate-900 px-3 py-1.5 text-sm text-white disabled:opacity-50">Save</button>
+          <button type="submit" :disabled="actionBusy" class="rounded-md bg-slate-900 px-3 py-1.5 text-sm text-white disabled:opacity-50">{{ actionBusy ? 'Saving…' : 'Save' }}</button>
           <button type="button" class="rounded-md border border-slate-300 px-3 py-1.5 text-sm" @click="editOpen = false">Cancel</button>
         </div>
       </form>

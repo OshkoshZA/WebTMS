@@ -178,7 +178,7 @@ async function revoke() {
           <input v-model.number="editRateLimit" type="number" min="1" required class="rounded-md border border-slate-300 px-3 py-2 text-sm" />
         </label>
         <div class="flex gap-3">
-          <button type="submit" :disabled="actionBusy" class="rounded-md bg-slate-900 px-3 py-1.5 text-sm text-white disabled:opacity-50">Save</button>
+          <button type="submit" :disabled="actionBusy" class="rounded-md bg-slate-900 px-3 py-1.5 text-sm text-white disabled:opacity-50">{{ actionBusy ? 'Saving…' : 'Save' }}</button>
           <button type="button" class="rounded-md border border-slate-300 px-3 py-1.5 text-sm" @click="editOpen = false">Cancel</button>
         </div>
       </form>

@@ -17,7 +17,7 @@ import {
   type SubmitDebriefIncidentRequest, type UnitOfMeasure, type Vehicle,
 } from '../api/types'
 import {
-  confirmationStatusTone, debriefStatusTone, formatDateTime, formatMoney, incidentSeverityTone,
+  confirmationStatusTone, debriefStatusTone, formatDate, formatDateTime, formatMoney, incidentSeverityTone,
   loadLegStatusTone, loadStatusTone,
 } from '../lib/presentation'
 
@@ -1042,7 +1042,7 @@ async function submitCarrierDebrief() {
                                   {{ expense.currencyId ? 'Accrual…' : 'Pick a currency first…' }}
                                 </option>
                                 <option v-for="a in accrualsForExpense(expense)" :key="a.id" :value="a.id">
-                                  {{ formatMoney(a.estimatedAmount, currencyCode(a.currencyId)) }} — {{ a.accrualDate }}
+                                  {{ formatMoney(a.estimatedAmount, currencyCode(a.currencyId)) }} — {{ formatDate(a.accrualDate) }}
                                 </option>
                               </select>
                               <button type="button" class="ml-auto text-sm text-rose-700 hover:text-rose-900" @click="removeDebriefExpense(i)">Remove</button>

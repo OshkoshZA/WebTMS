@@ -250,7 +250,7 @@ function toggleContactActive(contact: PortalContact) {
           <input v-model="editForm.bankingDetails" type="text" class="rounded-md border border-slate-300 px-3 py-2 text-sm" />
         </label>
         <div class="col-span-2 flex gap-3">
-          <button type="submit" :disabled="actionBusy" class="rounded-md bg-slate-900 px-3 py-1.5 text-sm text-white disabled:opacity-50">Save</button>
+          <button type="submit" :disabled="actionBusy" class="rounded-md bg-slate-900 px-3 py-1.5 text-sm text-white disabled:opacity-50">{{ actionBusy ? 'Saving…' : 'Save' }}</button>
           <button type="button" class="rounded-md border border-slate-300 px-3 py-1.5 text-sm" @click="editOpen = false">Cancel</button>
         </div>
       </form>
@@ -279,7 +279,7 @@ function toggleContactActive(contact: PortalContact) {
             <option v-for="c in availableCurrenciesToAdd" :key="c.id" :value="c.id">{{ c.code }} — {{ c.name }}</option>
           </select>
         </label>
-        <button type="submit" :disabled="actionBusy" class="rounded-md bg-slate-900 px-3 py-1.5 text-sm text-white disabled:opacity-50">Add</button>
+        <button type="submit" :disabled="actionBusy" class="rounded-md bg-slate-900 px-3 py-1.5 text-sm text-white disabled:opacity-50">{{ actionBusy ? 'Adding…' : 'Add' }}</button>
         <button type="button" class="rounded-md border border-slate-300 px-3 py-1.5 text-sm" @click="addCurrencyOpen = false">Cancel</button>
       </form>
 
@@ -342,7 +342,7 @@ function toggleContactActive(contact: PortalContact) {
           No role is restricted to only portal.subcontractor.* functions yet — create one on the Roles screen first.
         </p>
         <div class="col-span-2 flex gap-3">
-          <button type="submit" :disabled="actionBusy" class="rounded-md bg-slate-900 px-3 py-1.5 text-sm text-white disabled:opacity-50">Create</button>
+          <button type="submit" :disabled="actionBusy" class="rounded-md bg-slate-900 px-3 py-1.5 text-sm text-white disabled:opacity-50">{{ actionBusy ? 'Creating…' : 'Create' }}</button>
           <button type="button" class="rounded-md border border-slate-300 px-3 py-1.5 text-sm" @click="addContactOpen = false">Cancel</button>
         </div>
       </form>

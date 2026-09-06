@@ -9,7 +9,7 @@ import { usersApi } from '../api/users'
 import { ApiError } from '../api/client'
 import { useAuthStore } from '../stores/auth'
 import { DSR_REQUEST_TYPE, DSR_STATUS, DSR_SUBJECT_TYPE, label, type DataSubjectRequest } from '../api/types'
-import { dsrStatusTone, formatDateTime } from '../lib/presentation'
+import { dsrStatusTone, formatDate, formatDateTime } from '../lib/presentation'
 
 const props = defineProps<{ id: string }>()
 const auth = useAuthStore()
@@ -145,7 +145,7 @@ async function runExport() {
         </div>
         <div>
           <dt class="text-slate-500">Due</dt>
-          <dd class="text-slate-900">{{ formatDateTime(request.dueDate) }}</dd>
+          <dd class="text-slate-900">{{ formatDate(request.dueDate) }}</dd>
         </div>
         <div v-if="request.fulfilledAt">
           <dt class="text-slate-500">Fulfilled</dt>

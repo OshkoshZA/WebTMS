@@ -7,6 +7,7 @@ import { referenceApi } from '../api/reference'
 import { ApiError } from '../api/client'
 import { useAuthStore } from '../stores/auth'
 import type { Currency, ExchangeRate } from '../api/types'
+import { formatDate } from '../lib/presentation'
 
 const auth = useAuthStore()
 
@@ -124,7 +125,7 @@ async function submitLookup() {
             </div>
             <div>
               <dt class="text-slate-500">Effective date</dt>
-              <dd class="text-slate-900">{{ lookupResult.effectiveDate }}</dd>
+              <dd class="text-slate-900">{{ formatDate(lookupResult.effectiveDate) }}</dd>
             </div>
           </dl>
         </div>
@@ -169,7 +170,7 @@ async function submitLookup() {
             </div>
             <div>
               <dt class="text-slate-500">Effective date</dt>
-              <dd class="text-slate-900">{{ captureResult.effectiveDate }}</dd>
+              <dd class="text-slate-900">{{ formatDate(captureResult.effectiveDate) }}</dd>
             </div>
           </dl>
         </div>

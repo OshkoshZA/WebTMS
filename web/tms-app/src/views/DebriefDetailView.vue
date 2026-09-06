@@ -14,7 +14,7 @@ import {
   CLAIMED_AGAINST, DEBRIEF_STATUS, INCIDENT_SEVERITY, INCIDENT_TYPE, label,
   type Currency, type Debrief, type Driver, type ExpenseType, type Vehicle,
 } from '../api/types'
-import { debriefStatusTone, formatDateTime, incidentSeverityTone } from '../lib/presentation'
+import { debriefStatusTone, formatDateTime, formatMoney, incidentSeverityTone } from '../lib/presentation'
 
 const props = defineProps<{ id: string }>()
 const auth = useAuthStore()
@@ -193,7 +193,7 @@ async function approve() {
             <tr v-for="expense in debrief.expenses" :key="expense.id" class="border-b border-slate-100 last:border-0">
               <td class="px-4 py-3 text-slate-900">{{ expenseTypeName(expense.expenseTypeId) }}</td>
               <td class="px-4 py-3 text-slate-600">{{ expense.description }}</td>
-              <td class="px-4 py-3 text-slate-600">{{ expense.amount }} {{ currencyCode(expense.currencyId) }}</td>
+              <td class="px-4 py-3 text-slate-600">{{ formatMoney(expense.amount, currencyCode(expense.currencyId)) }}</td>
               <td class="px-4 py-3 text-slate-600">{{ label(CLAIMED_AGAINST, expense.claimedAgainst) }}</td>
             </tr>
           </tbody>

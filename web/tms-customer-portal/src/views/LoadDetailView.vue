@@ -7,7 +7,7 @@ import { loadsApi } from '../api/loads'
 import { referenceApi } from '../api/reference'
 import { ApiError } from '../api/client'
 import { LOAD_LEG_STATUS, LOAD_STATUS, label, type Load, type LoadType, type LoadTracking } from '../api/types'
-import { formatDateTime, loadStatusTone } from '../lib/presentation'
+import { formatDateTime, loadLegStatusTone, loadStatusTone } from '../lib/presentation'
 
 const props = defineProps<{ id: string }>()
 
@@ -81,7 +81,7 @@ onMounted(async () => {
               class="border-b border-slate-100 last:border-0"
             >
               <td class="px-4 py-3 text-slate-600">{{ leg.sequenceNo }}</td>
-              <td class="px-4 py-3"><StatusBadge :text="label(LOAD_LEG_STATUS, leg.status)" tone="info" /></td>
+              <td class="px-4 py-3"><StatusBadge :text="label(LOAD_LEG_STATUS, leg.status)" :tone="loadLegStatusTone(leg.status)" /></td>
             </tr>
             <tr v-if="!tracking?.legs.length">
               <td colspan="2" class="px-4 py-6 text-center text-slate-500">No legs yet.</td>

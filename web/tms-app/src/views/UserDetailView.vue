@@ -153,7 +153,7 @@ function removeAssignment(companyRoleId: string) {
           <input v-model="editDisplayName" type="text" required class="rounded-md border border-slate-300 px-3 py-2 text-sm" />
         </label>
         <div class="flex gap-3">
-          <button type="submit" :disabled="actionBusy" class="rounded-md bg-slate-900 px-3 py-1.5 text-sm text-white disabled:opacity-50">Save</button>
+          <button type="submit" :disabled="actionBusy" class="rounded-md bg-slate-900 px-3 py-1.5 text-sm text-white disabled:opacity-50">{{ actionBusy ? 'Saving…' : 'Save' }}</button>
           <button type="button" class="rounded-md border border-slate-300 px-3 py-1.5 text-sm" @click="editOpen = false">Cancel</button>
         </div>
       </form>
@@ -189,7 +189,7 @@ function removeAssignment(companyRoleId: string) {
             <option v-for="r in roles" :key="r.id" :value="r.id">{{ r.name }}</option>
           </select>
         </label>
-        <button type="submit" :disabled="actionBusy" class="rounded-md bg-slate-900 px-3 py-1.5 text-sm text-white disabled:opacity-50">Assign</button>
+        <button type="submit" :disabled="actionBusy" class="rounded-md bg-slate-900 px-3 py-1.5 text-sm text-white disabled:opacity-50">{{ actionBusy ? 'Assigning…' : 'Assign' }}</button>
         <button type="button" class="rounded-md border border-slate-300 px-3 py-1.5 text-sm" @click="addAssignmentOpen = false">Cancel</button>
       </form>
 
