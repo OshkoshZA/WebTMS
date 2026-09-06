@@ -13,20 +13,37 @@ namespace Tms.Api.Tests;
 /// actual signed request sent, not a mocked stand-in for it. Only the three events this
 /// pass wires up (invoice.issued, creditnote.issued, subcontractor_expense.available_for_export)
 /// are covered end to end; the rest are registerable but not yet published anywhere.
+///
+/// StaffTestFixture's database is shared and never reset, so every subscription this
+/// class creates would otherwise sit around Active forever, matching the same events in
+/// every later run against the same seeded demo company. IAsyncLifetime.DisposeAsync
+/// disables everything SubscribeAsync created so this class stops adding to that pile —
+/// WebhookTestReceiver's per-instance URL token (not this) is what actually keeps
+/// already-existing stale rows from corrupting assertions.
 /// </summary>
 [Collection(StaffTestCollection.Name)]
-public class WebhookTests
+public class WebhookTests : IAsyncLifetime
 {
     private readonly StaffTestFixture _fx;
+    private readonly List<Guid> _createdSubscriptionIds = new();
 
     public WebhookTests(StaffTestFixture fx) => _fx = fx;
+
+    public Task InitializeAsync() => Task.CompletedTask;
+
+    public async Task DisposeAsync()
+    {
+        foreach (var id in _createdSubscriptionIds)
+            await _fx.StaffClient.PostAsync($"/api/v1/webhooks/subscriptions/{id}/disable", null);
+    }
 
     private async Task<(Guid Id, string Secret)> SubscribeAsync(string eventType, string callbackUrl)
     {
         var response = await _fx.StaffClient.PostAsJsonAsync("/api/v1/webhooks/subscriptions", new { eventType, callbackUrl });
         response.EnsureSuccessStatusCode();
         var dto = await response.Content.ReadFromJsonAsync<CreateSubscriptionDto>();
-        return (dto!.Id, dto.Secret);
+        _createdSubscriptionIds.Add(dto!.Id);
+        return (dto.Id, dto.Secret);
     }
 
     private async Task<Guid> IssuePodReceivedInvoiceAsync(decimal sellRatePerUnit = 500)

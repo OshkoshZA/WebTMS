@@ -8,6 +8,19 @@ namespace Tms.Api.Tests;
 /// platform sent, not a mocked stand-in for it. One instance per test (see the `using`
 /// at each call site) rather than shared across the collection, so a test picking
 /// RespondWith(500) can't affect another test running the same second.
+///
+/// The dev SQL Server database this suite runs against is shared and never reset
+/// (StaffTestFixture), so WebhookSubscriptions rows from long-past runs sit around
+/// forever, still Active, still matching any future invoice/credit-note/etc. issued
+/// anywhere in the whole suite for the same seeded demo company — and delivery is
+/// synchronous and inline (no background retry worker exists), so a stale subscription
+/// gets a real HTTP attempt fired at its old callback URL the moment such an event
+/// next fires. Because the OS reissues ephemeral loopback ports, that old URL's port
+/// can and does get handed to a brand-new instance of this class. The unique path
+/// segment below is what stops that from becoming cross-test contamination: a stale
+/// subscription's URL points at some *other* instance's path, so http.sys simply has
+/// no listener registered for it and answers 404 without this instance ever seeing the
+/// request — instead of the request silently landing in Requests as if it were ours.
 /// </summary>
 public sealed class WebhookTestReceiver : IDisposable
 {
@@ -20,12 +33,37 @@ public sealed class WebhookTestReceiver : IDisposable
 
     public WebhookTestReceiver()
     {
-        var port = GetFreeLoopbackPort();
-        Url = $"http://127.0.0.1:{port}/hook/";
-        _listener = new HttpListener();
-        _listener.Prefixes.Add(Url);
-        _listener.Start();
-        _ = Task.Run(AcceptLoopAsync);
+        var instanceToken = Guid.NewGuid().ToString("N");
+        const int maxAttempts = 5;
+        Exception? lastError = null;
+
+        for (var attempt = 1; attempt <= maxAttempts; attempt++)
+        {
+            var port = GetFreeLoopbackPort();
+            var url = $"http://127.0.0.1:{port}/hook/{instanceToken}/";
+            var listener = new HttpListener();
+            listener.Prefixes.Add(url);
+            try
+            {
+                listener.Start();
+                Url = url;
+                _listener = listener;
+                _ = Task.Run(AcceptLoopAsync);
+                return;
+            }
+            catch (HttpListenerException ex)
+            {
+                // Another process (or another WebhookTestReceiver started concurrently by a
+                // test in a different xUnit collection) grabbed this same ephemeral port
+                // between GetFreeLoopbackPort() releasing it and Start() re-claiming it.
+                // Retry with a fresh port rather than let a TOCTOU race fail the test.
+                lastError = ex;
+                listener.Close();
+            }
+        }
+
+        throw new InvalidOperationException(
+            $"Could not bind a loopback HttpListener after {maxAttempts} attempts.", lastError);
     }
 
     public void RespondWith(int statusCode) => _responseStatusCode = statusCode;
