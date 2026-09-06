@@ -499,6 +499,29 @@ export interface Company {
   id: string
   legalName: string
   tradingName: string | null
+  registrationNo: string
+  vatNumber: string
+  physicalAddress: string
+  postalAddress: string
+  bankingDetails: string
+  invoiceNumberPrefix: string
+  logoUrl: string | null
+  invoicingEnabled: boolean
+  countryId: string
+  currencyId: string
+}
+
+export interface UpdateCompanyRequest {
+  legalName: string
+  tradingName?: string
+  registrationNo: string
+  vatNumber: string
+  physicalAddress: string
+  postalAddress: string
+  bankingDetails: string
+  invoiceNumberPrefix: string
+  logoUrl?: string
+  invoicingEnabled: boolean
 }
 
 export interface AppFunction {

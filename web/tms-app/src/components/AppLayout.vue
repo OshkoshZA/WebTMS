@@ -89,6 +89,9 @@ async function logout() {
             >
               Audit trail
             </router-link>
+            <router-link to="/company-settings" class="text-slate-600 hover:text-slate-900" active-class="font-semibold text-slate-900">
+              Company settings
+            </router-link>
             <router-link to="/exceptions" class="text-slate-600 hover:text-slate-900" active-class="font-semibold text-slate-900">
               Exceptions
             </router-link>

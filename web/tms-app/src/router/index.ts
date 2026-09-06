@@ -56,6 +56,7 @@ export const router = createRouter({
     { path: '/data-subject-requests/new', name: 'dsr-new', component: () => import('../views/DataSubjectRequestCreateView.vue') },
     { path: '/data-subject-requests/:id', name: 'dsr-detail', component: () => import('../views/DataSubjectRequestDetailView.vue'), props: true },
     { path: '/audit-trail', name: 'audit-trail', component: () => import('../views/AuditTrailView.vue') },
+    { path: '/company-settings', name: 'company-settings', component: () => import('../views/CompanySettingsView.vue') },
     { path: '/exceptions', name: 'exceptions-list', component: () => import('../views/ExceptionsListView.vue') },
     { path: '/:pathMatch(.*)*', redirect: '/dashboard' },
   ],
