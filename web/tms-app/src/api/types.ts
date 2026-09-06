@@ -91,6 +91,12 @@ export const INCIDENT_SEVERITY = ['Info', 'Warning', 'Critical'] as const
 
 export const CLAIMED_AGAINST = ['Company', 'SubcontractorAccrual'] as const
 
+export const SUBCONTRACTOR_ACCRUAL_STATUS = ['Accrued', 'Netted'] as const
+
+export const SUPPLIER_INVOICE_STATUS = ['Received', 'Matched', 'Disputed'] as const
+
+export const SUBCONTRACTOR_EXPENSE_STATUS = ['AvailableToExport', 'Exported', 'Paid'] as const
+
 export function label(values: readonly string[], value: number): string {
   return values[value] ?? `Unknown (${value})`
 }
@@ -767,6 +773,53 @@ export interface Debrief {
   resolutionNote: string | null
   incidents: DebriefIncident[]
   expenses: DebriefExpense[]
+}
+
+export interface SubcontractorAccrual {
+  id: string
+  rateLineBuyId: string
+  subcontractorId: string
+  currencyId: string
+  accrualDate: string
+  estimatedAmount: number
+  status: number // SUBCONTRACTOR_ACCRUAL_STATUS
+}
+
+export interface SubcontractorExpense {
+  id: string
+  rateLineBuyId: string
+  accrualId: string
+  financialPeriodId: string
+  amount: number
+  status: number // SUBCONTRACTOR_EXPENSE_STATUS
+  finalizedDate: string
+}
+
+export interface SupplierInvoice {
+  id: string
+  subcontractorId: string
+  currencyId: string
+  supplierInvoiceNumber: string
+  invoiceDate: string
+  receivedDate: string
+  amount: number
+  status: number // SUPPLIER_INVOICE_STATUS
+  disputeReason: string | null
+  expenses: SubcontractorExpense[]
+}
+
+export interface CreateSupplierInvoiceRequest {
+  subcontractorId: string
+  supplierInvoiceNumber: string
+  invoiceDate: string
+  receivedDate: string
+  amount: number
+  currencyId?: string
+}
+
+export interface MatchSupplierInvoiceResponse {
+  invoice: SupplierInvoice
+  varianceAmount: number
 }
 
 export interface ExceptionRecord {

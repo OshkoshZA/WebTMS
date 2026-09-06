@@ -99,6 +99,18 @@ export function incidentSeverityTone(severity: number): Tone {
   return severity === 2 ? 'danger' : severity === 1 ? 'warning' : 'info'
 }
 
+export function accrualStatusTone(status: number): Tone {
+  return status === 0 ? 'warning' : 'success'
+}
+
+export function supplierInvoiceStatusTone(status: number): Tone {
+  return status === 0 ? 'warning' : status === 1 ? 'success' : 'danger'
+}
+
+export function subcontractorExpenseStatusTone(status: number): Tone {
+  return status === 0 ? 'info' : status === 1 ? 'warning' : 'success'
+}
+
 export function formatMoney(amount: number, currencyCode: string): string {
   return `${amount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ${currencyCode}`
 }
