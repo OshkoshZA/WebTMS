@@ -5,7 +5,7 @@ import ErrorAlert from '../components/ErrorAlert.vue'
 import StatusBadge from '../components/StatusBadge.vue'
 import { creditNotesApi } from '../api/creditNotes'
 import { referenceApi } from '../api/reference'
-import { ApiError } from '../api/client'
+import { ApiError, downloadFile } from '../api/client'
 import { CREDIT_NOTE_STATUS, label, type CreditNote, type Currency } from '../api/types'
 import { creditNoteStatusTone, formatDate, formatMoney } from '../lib/presentation'
 
@@ -14,6 +14,19 @@ const currencies = ref<Currency[]>([])
 const loading = ref(true)
 const error = ref('')
 const expandedId = ref<string | null>(null)
+const pdfBusyId = ref<string | null>(null)
+
+async function downloadPdf(creditNote: CreditNote) {
+  error.value = ''
+  pdfBusyId.value = creditNote.id
+  try {
+    await downloadFile(`/credit-notes/${creditNote.id}/pdf`, `${creditNote.creditNoteNumber}.pdf`)
+  } catch (e) {
+    error.value = e instanceof ApiError ? e.message : 'Could not download the PDF — please try again.'
+  } finally {
+    pdfBusyId.value = null
+  }
+}
 
 function currencyCode(currencyId: string): string {
   return currencies.value.find((c) => c.id === currencyId)?.code ?? currencyId
@@ -39,7 +52,6 @@ onMounted(async () => {
 <template>
   <AppLayout>
     <h1 class="text-xl font-semibold text-slate-900">Credit notes</h1>
-    <p class="mt-1 text-sm text-slate-500">PDF download isn't available yet — no document-rendering pipeline exists for this yet.</p>
 
     <ErrorAlert v-if="error" :message="error" class="mt-4" />
     <p v-else-if="loading" class="mt-6 text-sm text-slate-500">Loading…</p>
@@ -54,6 +66,7 @@ onMounted(async () => {
             <th class="px-4 py-3">Issue date</th>
             <th class="px-4 py-3">Total</th>
             <th class="px-4 py-3">Status</th>
+            <th class="px-4 py-3">PDF</th>
           </tr>
         </thead>
         <tbody>
@@ -64,9 +77,20 @@ onMounted(async () => {
               <td class="px-4 py-3 text-slate-600">{{ formatDate(creditNote.issueDate) }}</td>
               <td class="px-4 py-3 text-slate-600">{{ formatMoney(creditNote.totalAmount, currencyCode(creditNote.currencyId)) }}</td>
               <td class="px-4 py-3"><StatusBadge :text="label(CREDIT_NOTE_STATUS, creditNote.status)" :tone="creditNoteStatusTone(creditNote.status)" /></td>
+              <td class="px-4 py-3">
+                <button
+                  v-if="creditNote.pdfUrl"
+                  type="button" :disabled="pdfBusyId === creditNote.id"
+                  class="text-sm font-medium text-slate-700 underline hover:text-slate-900 disabled:opacity-50"
+                  @click.stop="downloadPdf(creditNote)"
+                >
+                  {{ pdfBusyId === creditNote.id ? 'Downloading…' : 'Download' }}
+                </button>
+                <span v-else class="text-sm text-slate-400">—</span>
+              </td>
             </tr>
             <tr v-if="expandedId === creditNote.id" class="border-b border-slate-100 bg-slate-50 last:border-0">
-              <td colspan="5" class="px-4 py-3">
+              <td colspan="6" class="px-4 py-3">
                 <table class="w-full text-left text-sm">
                   <thead class="text-xs uppercase tracking-wide text-slate-500">
                     <tr>

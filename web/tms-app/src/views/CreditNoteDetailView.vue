@@ -6,7 +6,7 @@ import StatusBadge from '../components/StatusBadge.vue'
 import { creditNotesApi } from '../api/creditNotes'
 import { clientsApi } from '../api/clients'
 import { referenceApi } from '../api/reference'
-import { ApiError } from '../api/client'
+import { ApiError, downloadFile } from '../api/client'
 import { useAuthStore } from '../stores/auth'
 import { CREDIT_NOTE_STATUS, label, type Client, type CreditNote, type Currency } from '../api/types'
 import { creditNoteStatusTone, formatDate, formatMoney } from '../lib/presentation'
@@ -74,6 +74,20 @@ async function voidCreditNote() {
     actionBusy.value = false
   }
 }
+
+const pdfBusy = ref(false)
+
+async function downloadPdf() {
+  actionError.value = ''
+  pdfBusy.value = true
+  try {
+    await downloadFile(`/credit-notes/${props.id}/pdf`, `${creditNote.value?.creditNoteNumber}.pdf`)
+  } catch (e) {
+    actionError.value = e instanceof ApiError ? e.message : 'Could not download the PDF — please try again.'
+  } finally {
+    pdfBusy.value = false
+  }
+}
 </script>
 
 <template>
@@ -91,6 +105,13 @@ async function voidCreditNote() {
       </div>
 
       <ErrorAlert v-if="actionError" :message="actionError" class="mt-4" />
+
+      <p v-if="creditNote.pdfUrl" class="mt-4">
+        <button type="button" :disabled="pdfBusy" class="text-sm font-medium text-slate-700 underline hover:text-slate-900 disabled:opacity-50" @click="downloadPdf">
+          {{ pdfBusy ? 'Downloading…' : 'Download PDF' }}
+        </button>
+      </p>
+      <p v-else-if="!isDraft" class="mt-4 text-sm text-slate-500">PDF not available for this credit note.</p>
 
       <dl class="mt-4 grid grid-cols-2 gap-4 text-sm sm:grid-cols-4">
         <div>

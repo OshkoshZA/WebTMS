@@ -40,6 +40,9 @@ public class Invoice : CompanyScopedEntity
     public decimal TotalIncVat { get; set; }
     public string? PdfUrl { get; set; }
 
+    /// <summary>The rendered document itself (§11.6) — set once, alongside PdfUrl, the moment this invoice is Issued, and never touched again. Retrieved via InvoicesController.GetPdf.</summary>
+    public byte[]? PdfContent { get; set; }
+
     public List<InvoiceLine> Lines { get; set; } = new();
 }
 

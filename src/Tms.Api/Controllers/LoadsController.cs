@@ -82,6 +82,7 @@ public class LoadsController : ControllerBase
     private readonly LoadStatusService _loadStatus;
     private readonly IAuthorizationService _authorizationService;
     private readonly ExceptionService _exceptions;
+    private readonly DocumentPdfService _pdf;
 
     public LoadsController(
         TmsDbContext db,
@@ -90,7 +91,8 @@ public class LoadsController : ControllerBase
         CreditExposureService creditExposure,
         LoadStatusService loadStatus,
         IAuthorizationService authorizationService,
-        ExceptionService exceptions)
+        ExceptionService exceptions,
+        DocumentPdfService pdf)
     {
         _db = db;
         _tenantContext = tenantContext;
@@ -99,6 +101,7 @@ public class LoadsController : ControllerBase
         _creditExposure = creditExposure;
         _loadStatus = loadStatus;
         _exceptions = exceptions;
+        _pdf = pdf;
     }
 
     /// <summary>
@@ -770,7 +773,11 @@ public class LoadsController : ControllerBase
     /// Issues a LoadConfirmation the moment a Subcontracted leg reaches Allocated
     /// (§8.2) — never created directly, and never twice for the same leg. Sequential
     /// DocumentNumber per company carries the same accepted concurrency caveat as
-    /// InvoicesController's NextInvoiceNumberAsync.
+    /// InvoicesController's NextInvoiceNumberAsync. Rendered to PDF (§11.6) at this
+    /// same moment and never again — a commodity line/rate added to this leg
+    /// afterward (allowed while still Planned, before a subcontractor is even known;
+    /// see AllocateLeg's own comment) simply isn't reflected, the same "never
+    /// re-rendered from current data" rule Invoice/CreditNote follow.
     /// </summary>
     private async Task EnsureLoadConfirmationAsync(LoadLeg leg, CancellationToken ct)
     {
@@ -778,14 +785,38 @@ public class LoadsController : ControllerBase
         if (await _db.Set<LoadConfirmation>().AnyAsync(lc => lc.LoadLegId == leg.Id, ct)) return;
 
         var count = await _db.Set<LoadConfirmation>().CountAsync(lc => lc.CompanyId == leg.CompanyId, ct);
-        _db.Set<LoadConfirmation>().Add(new LoadConfirmation
+        var confirmation = new LoadConfirmation
         {
             TenantId = leg.TenantId,
             CompanyId = leg.CompanyId,
             LoadLegId = leg.Id,
             SubcontractorId = leg.SubcontractorId.Value,
             DocumentNumber = $"LC{count + 1:D6}"
-        });
+        };
+
+        var subcontractor = await _db.Subcontractors.FirstAsync(s => s.Id == leg.SubcontractorId.Value, ct);
+        var company = await _db.Companies.FirstAsync(c => c.Id == leg.CompanyId, ct);
+        var originName = (await _db.Locations.FirstAsync(l => l.Id == leg.OriginLocationId, ct)).Name;
+        var destinationName = (await _db.Locations.FirstAsync(l => l.Id == leg.DestinationLocationId, ct)).Name;
+
+        var buyTotalsByCurrencyId = await _db.Set<RateLine>()
+            .Where(r => r.Direction == RateLineDirection.Buy && r.SourceType == RateLineSourceType.CommodityLine)
+            .Join(_db.Set<CommodityLine>(), r => r.SourceId, cl => cl.Id, (r, cl) => new { r, cl })
+            .Where(x => x.cl.LoadLegId == leg.Id)
+            .GroupBy(x => x.r.CurrencyId)
+            .Select(g => new { CurrencyId = g.Key, Amount = g.Sum(x => x.r.Amount) })
+            .ToListAsync(ct);
+        var currencyCodes = await _db.Currencies
+            .Where(c => buyTotalsByCurrencyId.Select(x => x.CurrencyId).Contains(c.Id))
+            .ToDictionaryAsync(c => c.Id, c => c.Code, ct);
+        var buyTotals = buyTotalsByCurrencyId
+            .Select(x => (currencyCodes.GetValueOrDefault(x.CurrencyId, "?"), x.Amount))
+            .ToList();
+
+        confirmation.PdfContent = _pdf.RenderLoadConfirmation(confirmation, subcontractor, company, originName, destinationName, buyTotals);
+        confirmation.PdfUrl = $"/api/v1/legs/{leg.Id}/confirmation/pdf";
+
+        _db.Set<LoadConfirmation>().Add(confirmation);
     }
 
     /// <summary>

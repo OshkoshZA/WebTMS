@@ -19,7 +19,7 @@ public record InvoiceLineResponse(Guid Id, Guid RateLineSellId, string Descripti
 
 public record InvoiceResponse(
     Guid Id, string InvoiceNumber, Guid ClientId, Guid CurrencyId, Guid FinancialPeriodId, DateOnly IssueDate, DateOnly DueDate,
-    InvoiceStatus Status, decimal TotalExVat, decimal VatAmount, decimal TotalIncVat, bool IsOverdue,
+    InvoiceStatus Status, decimal TotalExVat, decimal VatAmount, decimal TotalIncVat, bool IsOverdue, string? PdfUrl,
     IReadOnlyList<InvoiceLineResponse> Lines);
 
 /// <summary>
@@ -42,16 +42,18 @@ public class InvoicesController : ControllerBase
     private readonly IAuthorizationService _authorizationService;
     private readonly WebhookPublisher _webhookPublisher;
     private readonly WebhookDeliveryService _webhookDelivery;
+    private readonly DocumentPdfService _pdf;
 
     public InvoicesController(
         TmsDbContext db, ITenantContext tenantContext, IAuthorizationService authorizationService,
-        WebhookPublisher webhookPublisher, WebhookDeliveryService webhookDelivery)
+        WebhookPublisher webhookPublisher, WebhookDeliveryService webhookDelivery, DocumentPdfService pdf)
     {
         _db = db;
         _tenantContext = tenantContext;
         _authorizationService = authorizationService;
         _webhookPublisher = webhookPublisher;
         _webhookDelivery = webhookDelivery;
+        _pdf = pdf;
     }
 
     /// <summary>Also the Customer Portal's own invoice list (§13.1, §13.2) — a portal caller is pinned to their own Client's invoices regardless of what clientId they pass.</summary>
@@ -194,7 +196,7 @@ public class InvoicesController : ControllerBase
         if (_tenantContext.TenantId is null || _tenantContext.CompanyId is null)
             return Unauthorized("Request is missing a resolved Tenant/Company context.");
 
-        var invoice = await _db.Invoices.FirstOrDefaultAsync(i => i.Id == id, ct);
+        var invoice = await _db.Invoices.Include(i => i.Lines).FirstOrDefaultAsync(i => i.Id == id, ct);
         if (invoice is null) return NotFound();
         if (invoice.Status != InvoiceStatus.Draft)
             return Conflict($"Invoice is {invoice.Status}; only a Draft invoice can be issued.");
@@ -204,6 +206,13 @@ public class InvoicesController : ControllerBase
         invoice.DueDate = invoice.IssueDate.AddDays(client.PaymentTermsDays);
         invoice.Status = InvoiceStatus.Issued;
 
+        // Rendered exactly once, here, and never again (§11.6) — a later template or
+        // rounding-rule change must never alter a PDF a client's already received.
+        var company = await _db.Companies.FirstAsync(c => c.Id == invoice.CompanyId, ct);
+        var currencyCode = (await _db.Currencies.FirstAsync(c => c.Id == invoice.CurrencyId, ct)).Code;
+        invoice.PdfContent = _pdf.RenderInvoice(invoice, client, company, currencyCode);
+        invoice.PdfUrl = $"/api/v1/invoices/{invoice.Id}/pdf";
+
         var deliveryIds = await _webhookPublisher.QueueAsync(
             _tenantContext.TenantId.Value, _tenantContext.CompanyId.Value,
             WebhookEventTypes.InvoiceIssued, nameof(Invoice), invoice.Id, ct);
@@ -211,6 +220,19 @@ public class InvoicesController : ControllerBase
         await _db.SaveChangesAsync(ct);
         await _webhookDelivery.DeliverAsync(deliveryIds, ct);
         return NoContent();
+    }
+
+    /// <summary>The archived PDF for an Issued invoice (§11.6) — same access rule as Get (portal caller pinned to their own Client, Draft never visible, though a Draft invoice has no PdfContent yet regardless).</summary>
+    [HttpGet("{id:guid}/pdf")]
+    public async Task<IActionResult> GetPdf(Guid id, CancellationToken ct)
+    {
+        var invoice = await _db.Invoices.FirstOrDefaultAsync(i => i.Id == id, ct);
+        if (invoice is null) return NotFound();
+        if (!_tenantContext.CanAccessClient(invoice.ClientId)) return Forbid();
+        if (_tenantContext.ClientId is not null && invoice.Status == InvoiceStatus.Draft) return Forbid();
+        if (invoice.PdfContent is null) return NotFound();
+
+        return File(invoice.PdfContent, "application/pdf", $"{invoice.InvoiceNumber}.pdf");
     }
 
     /// <summary>Draft -> Void — the only cancellation path (§10.1), and only while still Draft.</summary>
@@ -243,5 +265,6 @@ public class InvoicesController : ControllerBase
         invoice.Id, invoice.InvoiceNumber, invoice.ClientId, invoice.CurrencyId, invoice.FinancialPeriodId, invoice.IssueDate, invoice.DueDate,
         invoice.Status, invoice.TotalExVat, invoice.VatAmount, invoice.TotalIncVat,
         IsOverdue: invoice.Status is InvoiceStatus.Issued or InvoiceStatus.PartPaid && invoice.DueDate < DateOnly.FromDateTime(DateTime.UtcNow),
+        invoice.PdfUrl,
         invoice.Lines.Select(l => new InvoiceLineResponse(l.Id, l.RateLineSellId, l.Description, l.Quantity, l.UnitOfMeasureId, l.Rate, l.Amount)).ToList());
 }

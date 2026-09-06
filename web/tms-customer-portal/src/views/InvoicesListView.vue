@@ -5,7 +5,7 @@ import ErrorAlert from '../components/ErrorAlert.vue'
 import StatusBadge from '../components/StatusBadge.vue'
 import { invoicesApi } from '../api/invoices'
 import { referenceApi } from '../api/reference'
-import { ApiError } from '../api/client'
+import { ApiError, downloadFile } from '../api/client'
 import { INVOICE_STATUS, label, type Currency, type Invoice } from '../api/types'
 import { formatDate, formatMoney, invoiceStatusTone } from '../lib/presentation'
 
@@ -14,6 +14,19 @@ const currencies = ref<Currency[]>([])
 const loading = ref(true)
 const error = ref('')
 const expandedId = ref<string | null>(null)
+const pdfBusyId = ref<string | null>(null)
+
+async function downloadPdf(invoice: Invoice) {
+  error.value = ''
+  pdfBusyId.value = invoice.id
+  try {
+    await downloadFile(`/invoices/${invoice.id}/pdf`, `${invoice.invoiceNumber}.pdf`)
+  } catch (e) {
+    error.value = e instanceof ApiError ? e.message : 'Could not download the PDF — please try again.'
+  } finally {
+    pdfBusyId.value = null
+  }
+}
 
 function currencyCode(currencyId: string): string {
   return currencies.value.find((c) => c.id === currencyId)?.code ?? currencyId
@@ -39,7 +52,6 @@ onMounted(async () => {
 <template>
   <AppLayout>
     <h1 class="text-xl font-semibold text-slate-900">Invoices</h1>
-    <p class="mt-1 text-sm text-slate-500">PDF download isn't available yet — no document-rendering pipeline exists for this yet.</p>
 
     <ErrorAlert v-if="error" :message="error" class="mt-4" />
     <p v-else-if="loading" class="mt-6 text-sm text-slate-500">Loading…</p>
@@ -54,6 +66,7 @@ onMounted(async () => {
             <th class="px-4 py-3">Due date</th>
             <th class="px-4 py-3">Total inc. VAT</th>
             <th class="px-4 py-3">Status</th>
+            <th class="px-4 py-3">PDF</th>
           </tr>
         </thead>
         <tbody>
@@ -69,9 +82,20 @@ onMounted(async () => {
                   <StatusBadge v-if="invoice.isOverdue" text="Overdue" tone="danger" />
                 </div>
               </td>
+              <td class="px-4 py-3">
+                <button
+                  v-if="invoice.pdfUrl"
+                  type="button" :disabled="pdfBusyId === invoice.id"
+                  class="text-sm font-medium text-slate-700 underline hover:text-slate-900 disabled:opacity-50"
+                  @click.stop="downloadPdf(invoice)"
+                >
+                  {{ pdfBusyId === invoice.id ? 'Downloading…' : 'Download' }}
+                </button>
+                <span v-else class="text-sm text-slate-400">—</span>
+              </td>
             </tr>
             <tr v-if="expandedId === invoice.id" class="border-b border-slate-100 bg-slate-50 last:border-0">
-              <td colspan="5" class="px-4 py-3">
+              <td colspan="6" class="px-4 py-3">
                 <table class="w-full text-left text-sm">
                   <thead class="text-xs uppercase tracking-wide text-slate-500">
                     <tr>

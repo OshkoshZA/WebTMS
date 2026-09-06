@@ -97,3 +97,30 @@ export const api = {
   put: <T>(path: string, body?: unknown): Promise<T> => request<T>('PUT', path, body ?? {}, false),
   delete: <T>(path: string): Promise<T> => request<T>('DELETE', path, undefined, false),
 }
+
+// For an endpoint that returns a file (a PDF, a CSV export) rather than JSON — needs
+// the same bearer token as every other call, so a plain <a href> won't work. Fetches
+// the bytes directly and triggers a browser download via a Blob object URL, the same
+// approach api/audit.ts's own CSV export already established. No 401-retry-on-expired-
+// token here, unlike the shared JSON request helper above — a stale token on one of
+// these rare, manually-clicked downloads just surfaces a clear error to retry.
+export async function downloadFile(path: string, fallbackFileName: string): Promise<void> {
+  const session = getSession()
+  const response = await fetch(`${BASE}${path}`, {
+    headers: session ? { Authorization: `Bearer ${session.accessToken}` } : {},
+  })
+  if (!response.ok) {
+    throw new ApiError(response.status, await parseErrorMessage(response))
+  }
+
+  const blob = await response.blob()
+  const fileName = response.headers.get('content-disposition')?.match(/filename="?([^"]+)"?/)?.[1] ?? fallbackFileName
+  const url = URL.createObjectURL(blob)
+  const link = document.createElement('a')
+  link.href = url
+  link.download = fileName
+  document.body.appendChild(link)
+  link.click()
+  link.remove()
+  URL.revokeObjectURL(url)
+}

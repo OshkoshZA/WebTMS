@@ -98,7 +98,7 @@ public class LegsController : ControllerBase
         return authResult.Succeeded ? null : Forbid();
     }
 
-    /// <summary>Retrieves a leg's Load Confirmation (§8.2) — PdfUrl is null for now, since there's no PDF-rendering infrastructure in this codebase yet. Row-level scoped for a Supplier Portal caller (§13.1), same as every other portal action.</summary>
+    /// <summary>Retrieves a leg's Load Confirmation (§8.2). Row-level scoped for a Supplier Portal caller (§13.1), same as every other portal action.</summary>
     [HttpGet("{id:guid}/confirmation")]
     public async Task<ActionResult<LoadConfirmationResponse>> GetConfirmation(Guid id, CancellationToken ct)
     {
@@ -109,6 +109,20 @@ public class LegsController : ControllerBase
         if (portalCheck is not null) return portalCheck;
 
         return Ok(ToResponse(confirmation));
+    }
+
+    /// <summary>The archived PDF for a leg's Load Confirmation (§11.6) — same access rule as GetConfirmation.</summary>
+    [HttpGet("{id:guid}/confirmation/pdf")]
+    public async Task<IActionResult> GetConfirmationPdf(Guid id, CancellationToken ct)
+    {
+        var confirmation = await _db.LoadConfirmations.FirstOrDefaultAsync(lc => lc.LoadLegId == id, ct);
+        if (confirmation is null) return NotFound();
+
+        var portalCheck = await CheckPortalAccessAsync(confirmation.SubcontractorId, "portal.subcontractor.viewlegs");
+        if (portalCheck is not null) return portalCheck;
+        if (confirmation.PdfContent is null) return NotFound();
+
+        return File(confirmation.PdfContent, "application/pdf", $"{confirmation.DocumentNumber}.pdf");
     }
 
     /// <summary>

@@ -6,7 +6,7 @@ import StatusBadge from '../components/StatusBadge.vue'
 import { accrualsApi } from '../api/accruals'
 import { legsApi } from '../api/legs'
 import { referenceApi } from '../api/reference'
-import { ApiError } from '../api/client'
+import { ApiError, downloadFile } from '../api/client'
 import { useAuthStore } from '../stores/auth'
 import {
   CLAIMED_AGAINST,
@@ -41,6 +41,19 @@ const confirmationBusy = ref(false)
 const confirmationError = ref('')
 const declineReason = ref('')
 const showDeclineForm = ref(false)
+const confirmationPdfBusy = ref(false)
+
+async function downloadConfirmationPdf() {
+  confirmationError.value = ''
+  confirmationPdfBusy.value = true
+  try {
+    await downloadFile(`/legs/${props.id}/confirmation/pdf`, `${leg.value?.confirmation?.documentNumber}.pdf`)
+  } catch (e) {
+    confirmationError.value = e instanceof ApiError ? e.message : 'Could not download the PDF — please try again.'
+  } finally {
+    confirmationPdfBusy.value = false
+  }
+}
 
 const debriefSubmitting = ref(false)
 const debriefError = ref('')
@@ -257,6 +270,15 @@ async function submitDebrief() {
           </div>
           <p v-if="leg.confirmation.declineReason" class="mt-2 text-sm text-rose-700">
             Decline reason: {{ leg.confirmation.declineReason }}
+          </p>
+          <p v-if="leg.confirmation.pdfUrl" class="mt-2">
+            <button
+              type="button" :disabled="confirmationPdfBusy"
+              class="text-sm font-medium text-slate-700 underline hover:text-slate-900 disabled:opacity-50"
+              @click="downloadConfirmationPdf"
+            >
+              {{ confirmationPdfBusy ? 'Downloading…' : 'Download PDF' }}
+            </button>
           </p>
 
           <ErrorAlert v-if="confirmationError" :message="confirmationError" class="mt-3" />

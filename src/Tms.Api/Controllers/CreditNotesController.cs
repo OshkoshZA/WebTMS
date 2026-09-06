@@ -45,10 +45,11 @@ public class CreditNotesController : ControllerBase
     private readonly IAuthorizationService _authorizationService;
     private readonly WebhookPublisher _webhookPublisher;
     private readonly WebhookDeliveryService _webhookDelivery;
+    private readonly DocumentPdfService _pdf;
 
     public CreditNotesController(
         TmsDbContext db, ITenantContext tenantContext, CreditExposureService creditExposure, IAuthorizationService authorizationService,
-        WebhookPublisher webhookPublisher, WebhookDeliveryService webhookDelivery)
+        WebhookPublisher webhookPublisher, WebhookDeliveryService webhookDelivery, DocumentPdfService pdf)
     {
         _db = db;
         _tenantContext = tenantContext;
@@ -56,6 +57,7 @@ public class CreditNotesController : ControllerBase
         _authorizationService = authorizationService;
         _webhookPublisher = webhookPublisher;
         _webhookDelivery = webhookDelivery;
+        _pdf = pdf;
     }
 
     /// <summary>Also the Customer Portal's own credit note list (§13.1, §13.2) — a portal caller is pinned to their own Client's credit notes regardless of what clientId they pass.</summary>
@@ -240,13 +242,23 @@ public class CreditNotesController : ControllerBase
         if (_tenantContext.TenantId is null || _tenantContext.CompanyId is null)
             return Unauthorized("Request is missing a resolved Tenant/Company context.");
 
-        var creditNote = await _db.Set<CreditNote>().FirstOrDefaultAsync(cn => cn.Id == id, ct);
+        var creditNote = await _db.Set<CreditNote>().Include(cn => cn.Lines).FirstOrDefaultAsync(cn => cn.Id == id, ct);
         if (creditNote is null) return NotFound();
         if (creditNote.Status != CreditNoteStatus.Draft)
             return Conflict($"Credit note is {creditNote.Status}; only a Draft credit note can be issued.");
 
         creditNote.IssueDate = request.IssueDate ?? DateOnly.FromDateTime(DateTime.UtcNow);
         creditNote.Status = CreditNoteStatus.Issued;
+
+        // Rendered exactly once, here, and never again (§11.6) — same rule as Invoice.
+        var client = await _db.Clients.FirstAsync(c => c.Id == creditNote.ClientId, ct);
+        var company = await _db.Companies.FirstAsync(c => c.Id == creditNote.CompanyId, ct);
+        var currencyCode = (await _db.Currencies.FirstAsync(c => c.Id == creditNote.CurrencyId, ct)).Code;
+        var originalInvoiceNumber = creditNote.OriginalInvoiceId is Guid originalInvoiceId
+            ? (await _db.Invoices.FirstAsync(i => i.Id == originalInvoiceId, ct)).InvoiceNumber
+            : null;
+        creditNote.PdfContent = _pdf.RenderCreditNote(creditNote, client, company, currencyCode, originalInvoiceNumber);
+        creditNote.PdfUrl = $"/api/v1/credit-notes/{creditNote.Id}/pdf";
 
         var deliveryIds = await _webhookPublisher.QueueAsync(
             _tenantContext.TenantId.Value, _tenantContext.CompanyId.Value,
@@ -255,6 +267,19 @@ public class CreditNotesController : ControllerBase
         await _db.SaveChangesAsync(ct);
         await _webhookDelivery.DeliverAsync(deliveryIds, ct);
         return NoContent();
+    }
+
+    /// <summary>The archived PDF for an Issued credit note (§11.6) — same access rule as Get.</summary>
+    [HttpGet("{id:guid}/pdf")]
+    public async Task<IActionResult> GetPdf(Guid id, CancellationToken ct)
+    {
+        var creditNote = await _db.Set<CreditNote>().FirstOrDefaultAsync(cn => cn.Id == id, ct);
+        if (creditNote is null) return NotFound();
+        if (!_tenantContext.CanAccessClient(creditNote.ClientId)) return Forbid();
+        if (_tenantContext.ClientId is not null && creditNote.Status == CreditNoteStatus.Draft) return Forbid();
+        if (creditNote.PdfContent is null) return NotFound();
+
+        return File(creditNote.PdfContent, "application/pdf", $"{creditNote.CreditNoteNumber}.pdf");
     }
 
     /// <summary>Draft -> Void — the only cancellation path (§10.1), and only while still Draft.</summary>

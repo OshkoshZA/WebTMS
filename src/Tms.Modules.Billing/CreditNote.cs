@@ -35,6 +35,9 @@ public class CreditNote : CompanyScopedEntity
     public decimal TotalAmount { get; set; }
     public string? PdfUrl { get; set; }
 
+    /// <summary>The rendered document itself (§11.6) — set once, alongside PdfUrl, the moment this credit note is Issued, and never touched again. Retrieved via CreditNotesController.GetPdf.</summary>
+    public byte[]? PdfContent { get; set; }
+
     public List<CreditNoteLine> Lines { get; set; } = new();
 }
 

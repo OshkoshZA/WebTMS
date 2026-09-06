@@ -7,7 +7,7 @@ import { loadsApi } from '../api/loads'
 import { legsApi } from '../api/legs'
 import { accrualsApi } from '../api/accruals'
 import { referenceApi } from '../api/reference'
-import { ApiError } from '../api/client'
+import { ApiError, downloadFile } from '../api/client'
 import {
   CLAIMED_AGAINST, CONFIRMATION_STATUS, DEBRIEF_STATUS, INCIDENT_SEVERITY, INCIDENT_TYPE,
   LOAD_LEG_EXECUTION_TYPE, LOAD_LEG_STATUS, LOAD_STATUS, label,
@@ -434,6 +434,21 @@ async function acknowledgeConfirmation() {
     confirmationBusy.value = false
   }
 }
+const confirmationPdfBusy = ref(false)
+
+async function downloadConfirmationPdf() {
+  if (!carrierLegId.value) return
+  confirmationError.value = ''
+  confirmationPdfBusy.value = true
+  try {
+    await downloadFile(`/legs/${carrierLegId.value}/confirmation/pdf`, `${confirmation.value?.documentNumber}.pdf`)
+  } catch (e) {
+    confirmationError.value = e instanceof ApiError ? e.message : 'Could not download the PDF — please try again.'
+  } finally {
+    confirmationPdfBusy.value = false
+  }
+}
+
 async function declineConfirmation() {
   if (!carrierLegId.value) return
   confirmationBusy.value = true
@@ -861,6 +876,15 @@ async function submitCarrierDebrief() {
                         </div>
                         <p v-if="confirmation.declineReason" class="mt-2 text-sm text-rose-700">
                           Decline reason: {{ confirmation.declineReason }}
+                        </p>
+                        <p v-if="confirmation.pdfUrl" class="mt-2">
+                          <button
+                            type="button" :disabled="confirmationPdfBusy"
+                            class="text-sm font-medium text-slate-700 underline hover:text-slate-900 disabled:opacity-50"
+                            @click="downloadConfirmationPdf"
+                          >
+                            {{ confirmationPdfBusy ? 'Downloading…' : 'Download PDF' }}
+                          </button>
                         </p>
 
                         <div v-if="confirmation.status === 0" class="mt-3">

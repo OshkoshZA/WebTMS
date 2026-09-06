@@ -408,6 +408,7 @@ export interface Invoice {
   vatAmount: number
   totalIncVat: number
   isOverdue: boolean
+  pdfUrl: string | null
   lines: InvoiceLine[]
 }
 

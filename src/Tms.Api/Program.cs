@@ -19,6 +19,11 @@ using Tms.Shared;
 
 var builder = WebApplication.CreateBuilder(args);
 
+// --- Document PDF rendering (§11.6): QuestPDF requires its license type declared
+// once, in code, before any document is generated. Community — free for organizations
+// under $1M USD annual gross revenue; re-check this if that ever changes. ---
+QuestPDF.Settings.License = QuestPDF.Infrastructure.LicenseType.Community;
+
 // --- Tenant context (§4.1) — request-scoped, populated by TenantContextMiddleware,
 // consumed by TmsDbContext's global query filters and the audit interceptor. ---
 builder.Services.AddScoped<HttpTenantContext>();
@@ -35,6 +40,7 @@ builder.Services.AddScoped<Tms.Api.Services.ExceptionService>();
 builder.Services.AddScoped<Tms.Api.Services.ComplianceReconciliationService>();
 builder.Services.AddScoped<Tms.Api.Services.WebhookPublisher>();
 builder.Services.AddScoped<Tms.Api.Services.WebhookDeliveryService>();
+builder.Services.AddSingleton<Tms.Api.Services.DocumentPdfService>();
 builder.Services.AddHttpClient("webhooks", client => client.Timeout = TimeSpan.FromSeconds(10));
 
 // --- Background jobs (§11.3): a plain BackgroundService/PeriodicTimer, not a new
