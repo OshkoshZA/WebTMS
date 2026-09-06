@@ -11,7 +11,8 @@ import { ApiError } from '../api/client'
 import { useAuthStore } from '../stores/auth'
 import {
   EXCEPTION_SEVERITY, LOAD_STATUS,
-  type CreditExposureSummary, type Currency, type ExceptionRecord, type Load, type MarginSummary, type PayablesSummary,
+  type AgedDebtorsSummary, type CreditExposureSummary, type Currency, type ExceptionRecord, type Load,
+  type MarginSummary, type OnTimeDeliverySummary, type PayablesSummary,
 } from '../api/types'
 import { formatMoney } from '../lib/presentation'
 
@@ -32,6 +33,8 @@ const currencies = ref<Currency[]>([])
 const marginSummary = ref<MarginSummary | null>(null)
 const creditExposureSummary = ref<CreditExposureSummary | null>(null)
 const payablesSummary = ref<PayablesSummary | null>(null)
+const agedDebtorsSummary = ref<AgedDebtorsSummary | null>(null)
+const onTimeDeliverySummary = ref<OnTimeDeliverySummary | null>(null)
 const loading = ref(true)
 const error = ref('')
 
@@ -61,13 +64,15 @@ function currencyCode(currencyId: string): string {
 
 onMounted(async () => {
   try {
-    const [loadList, exceptionList, currencyList, margin, exposure, payables] = await Promise.all([
+    const [loadList, exceptionList, currencyList, margin, exposure, payables, agedDebtors, onTimeDelivery] = await Promise.all([
       loadsApi.list(),
       exceptionsApi.list(0),
       referenceApi.currencies(),
       dashboardApi.marginSummary(),
       dashboardApi.creditExposureSummary(),
       dashboardApi.payablesSummary(),
+      dashboardApi.agedDebtorsSummary(),
+      dashboardApi.onTimeDeliverySummary(),
     ])
     loads.value = loadList
     openExceptions.value = exceptionList
@@ -75,6 +80,8 @@ onMounted(async () => {
     marginSummary.value = margin
     creditExposureSummary.value = exposure
     payablesSummary.value = payables
+    agedDebtorsSummary.value = agedDebtors
+    onTimeDeliverySummary.value = onTimeDelivery
   } catch (e) {
     error.value = e instanceof ApiError ? e.message : 'Could not load the dashboard.'
   } finally {
@@ -205,6 +212,40 @@ onMounted(async () => {
             <p class="text-2xl font-semibold text-slate-900">{{ payablesSummary.paid }}</p>
             <p class="mt-1 text-sm text-slate-500">Paid</p>
           </RouterLink>
+        </div>
+      </section>
+
+      <section v-if="agedDebtorsSummary && agedDebtorsSummary.byCurrency.length" class="mt-8">
+        <h2 class="text-sm font-semibold uppercase tracking-wide text-slate-500">Aged debtors</h2>
+        <RouterLink
+          to="/clients"
+          class="mt-3 grid max-w-2xl grid-cols-1 gap-4 rounded-lg border border-slate-200 bg-white p-4 hover:border-slate-300 hover:shadow-sm sm:grid-cols-2"
+        >
+          <div v-for="row in agedDebtorsSummary.byCurrency" :key="row.currencyId">
+            <p class="text-2xl font-semibold text-slate-900">
+              {{ formatMoney(row.totalOutstanding, currencyCode(row.currencyId)) }}
+            </p>
+            <p class="mt-1 text-sm text-slate-500">
+              Current {{ formatMoney(row.currentAmount, currencyCode(row.currencyId)) }} · 30d {{ formatMoney(row.days30, currencyCode(row.currencyId)) }}
+              · 60d {{ formatMoney(row.days60, currencyCode(row.currencyId)) }} · 90d {{ formatMoney(row.days90, currencyCode(row.currencyId)) }}
+              · 90d+ {{ formatMoney(row.days90Plus, currencyCode(row.currencyId)) }}
+            </p>
+          </div>
+        </RouterLink>
+      </section>
+
+      <section v-if="onTimeDeliverySummary" class="mt-8">
+        <h2 class="text-sm font-semibold uppercase tracking-wide text-slate-500">On-time delivery rate</h2>
+        <div class="mt-3 max-w-md rounded-lg border border-slate-200 bg-white p-4">
+          <p v-if="onTimeDeliverySummary.onTimeRatePercent === null" class="text-sm text-slate-500">
+            No delivered load has a promised delivery window to judge yet.
+          </p>
+          <template v-else>
+            <p class="text-2xl font-semibold text-slate-900">{{ onTimeDeliverySummary.onTimeRatePercent }}%</p>
+            <p class="mt-1 text-sm text-slate-500">
+              {{ onTimeDeliverySummary.onTimeCount }} on time · {{ onTimeDeliverySummary.lateCount }} late
+            </p>
+          </template>
         </div>
       </section>
       </div>

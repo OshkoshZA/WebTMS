@@ -32,8 +32,174 @@ public class DashboardTests
     private Task<PayablesSummaryDto> GetPayablesSummaryAsync() =>
         _fx.StaffClient.GetFromJsonAsync<PayablesSummaryDto>("/api/v1/dashboard/payables-summary")!;
 
+    private Task<AgedDebtorsSummaryDto> GetAgedDebtorsSummaryAsync() =>
+        _fx.StaffClient.GetFromJsonAsync<AgedDebtorsSummaryDto>("/api/v1/dashboard/aged-debtors-summary")!;
+
+    private Task<OnTimeDeliverySummaryDto> GetOnTimeDeliverySummaryAsync() =>
+        _fx.StaffClient.GetFromJsonAsync<OnTimeDeliverySummaryDto>("/api/v1/dashboard/on-time-delivery-summary")!;
+
     private decimal ExposureFor(CreditExposureSummaryDto summary, Guid currencyId, Func<CurrencyExposureDto, decimal> select) =>
         summary.ByCurrency.FirstOrDefault(c => c.CurrencyId == currencyId) is { } row ? select(row) : 0m;
+
+    private decimal AgedFor(AgedDebtorsSummaryDto summary, Guid currencyId, Func<CurrencyAgingDto, decimal> select) =>
+        summary.ByCurrency.FirstOrDefault(c => c.CurrencyId == currencyId) is { } row ? select(row) : 0m;
+
+    /// <summary>Issues a fresh, PodReceived, invoiced load for the given client with an IssueDate/DueDate landing exactly daysOverdue days overdue as of today (PaymentTermsDays is fixed at 30 by CreateClientAsync).</summary>
+    private async Task<Guid> IssueInvoiceOverdueByAsync(Guid clientId, string referenceNo, decimal sellRatePerUnit, int daysOverdue)
+    {
+        var (loadId, legId) = await _fx.CreateBookedLoadWithLegAsync(clientId, referenceNo, sellRatePerUnit: sellRatePerUnit);
+        await _fx.DeliverLegAsync(loadId, legId);
+        (await _fx.StaffClient.PostAsJsonAsync($"/api/v1/legs/{legId}/debrief",
+            new { podReceived = true, podImageUrl = "https://example.com/pod.jpg" })).EnsureSuccessStatusCode();
+
+        var generateResponse = await _fx.StaffClient.PostAsJsonAsync("/api/v1/invoices/generate", new { clientId });
+        generateResponse.EnsureSuccessStatusCode();
+        var invoiceId = (await generateResponse.Content.ReadFromJsonAsync<IdDto>())!.Id;
+
+        var issueDate = DateOnly.FromDateTime(DateTime.UtcNow).AddDays(-(daysOverdue + 30));
+        (await _fx.StaffClient.PostAsJsonAsync($"/api/v1/invoices/{invoiceId}/issue", new { issueDate })).EnsureSuccessStatusCode();
+        return invoiceId;
+    }
+
+    [Fact]
+    public async Task An_invoice_45_days_overdue_lands_in_the_days60_bucket_and_nothing_else_moves()
+    {
+        var clientId = await _fx.CreateClientAsync(Guid.NewGuid().ToString("N")[..8]);
+        var before = await GetAgedDebtorsSummaryAsync();
+
+        await IssueInvoiceOverdueByAsync(clientId, $"DASHAGE60-{Guid.NewGuid():N}", 400m, daysOverdue: 45);
+
+        var after = await GetAgedDebtorsSummaryAsync();
+
+        Assert.Equal(AgedFor(before, ZarCurrencyId, c => c.Days60) + 400m, AgedFor(after, ZarCurrencyId, c => c.Days60));
+        Assert.Equal(AgedFor(before, ZarCurrencyId, c => c.CurrentAmount), AgedFor(after, ZarCurrencyId, c => c.CurrentAmount));
+        Assert.Equal(AgedFor(before, ZarCurrencyId, c => c.Days30), AgedFor(after, ZarCurrencyId, c => c.Days30));
+        Assert.Equal(AgedFor(before, ZarCurrencyId, c => c.Days90), AgedFor(after, ZarCurrencyId, c => c.Days90));
+        Assert.Equal(AgedFor(before, ZarCurrencyId, c => c.Days90Plus), AgedFor(after, ZarCurrencyId, c => c.Days90Plus));
+    }
+
+    [Fact]
+    public async Task An_invoice_not_yet_due_lands_in_the_current_bucket()
+    {
+        var clientId = await _fx.CreateClientAsync(Guid.NewGuid().ToString("N")[..8]);
+        var before = await GetAgedDebtorsSummaryAsync();
+
+        await IssueInvoiceOverdueByAsync(clientId, $"DASHAGECUR-{Guid.NewGuid():N}", 250m, daysOverdue: -10);
+
+        var after = await GetAgedDebtorsSummaryAsync();
+
+        Assert.Equal(AgedFor(before, ZarCurrencyId, c => c.CurrentAmount) + 250m, AgedFor(after, ZarCurrencyId, c => c.CurrentAmount));
+    }
+
+    [Fact]
+    public async Task Crediting_part_of_an_overdue_invoice_reduces_its_own_bucket_by_exactly_that_amount()
+    {
+        var clientId = await _fx.CreateClientAsync(Guid.NewGuid().ToString("N")[..8]);
+        var invoiceId = await IssueInvoiceOverdueByAsync(clientId, $"DASHAGECN-{Guid.NewGuid():N}", 500m, daysOverdue: 45);
+        var invoiceLineId = (await _fx.StaffClient.GetFromJsonAsync<InvoiceDetailDto>($"/api/v1/invoices/{invoiceId}"))!.Lines[0].Id;
+
+        var before = await GetAgedDebtorsSummaryAsync();
+
+        var createResponse = await _fx.StaffClient.PostAsJsonAsync("/api/v1/credit-notes", new
+        {
+            clientId,
+            originalInvoiceId = invoiceId,
+            reason = "Aging bucket test",
+            lines = new[] { new { invoiceLineId, description = "Partial credit", amount = 200m } }
+        });
+        createResponse.EnsureSuccessStatusCode();
+        var creditNoteId = (await createResponse.Content.ReadFromJsonAsync<IdDto>())!.Id;
+        (await _fx.StaffClient.PostAsJsonAsync($"/api/v1/credit-notes/{creditNoteId}/issue", new { })).EnsureSuccessStatusCode();
+
+        var after = await GetAgedDebtorsSummaryAsync();
+
+        Assert.Equal(AgedFor(before, ZarCurrencyId, c => c.Days60) - 200m, AgedFor(after, ZarCurrencyId, c => c.Days60));
+    }
+
+    [Fact]
+    public async Task A_standalone_credit_note_reduces_the_current_bucket()
+    {
+        var clientId = await _fx.CreateClientAsync(Guid.NewGuid().ToString("N")[..8]);
+        var before = await GetAgedDebtorsSummaryAsync();
+
+        var createResponse = await _fx.StaffClient.PostAsJsonAsync("/api/v1/credit-notes", new
+        {
+            clientId,
+            reason = "Standalone aging bucket test",
+            lines = new[] { new { description = "Goodwill", amount = 75m } }
+        });
+        createResponse.EnsureSuccessStatusCode();
+        var creditNoteId = (await createResponse.Content.ReadFromJsonAsync<IdDto>())!.Id;
+        (await _fx.StaffClient.PostAsJsonAsync($"/api/v1/credit-notes/{creditNoteId}/issue", new { })).EnsureSuccessStatusCode();
+
+        var after = await GetAgedDebtorsSummaryAsync();
+
+        Assert.Equal(AgedFor(before, ZarCurrencyId, c => c.CurrentAmount) - 75m, AgedFor(after, ZarCurrencyId, c => c.CurrentAmount));
+    }
+
+    [Fact]
+    public async Task A_client_scoped_live_aging_view_matches_the_company_wide_bucket_for_a_fresh_overdue_invoice()
+    {
+        var clientId = await _fx.CreateClientAsync(Guid.NewGuid().ToString("N")[..8]);
+        await IssueInvoiceOverdueByAsync(clientId, $"DASHAGELIVE-{Guid.NewGuid():N}", 300m, daysOverdue: 10);
+
+        var live = await _fx.StaffClient.GetFromJsonAsync<ClientAgingDto>($"/api/v1/clients/{clientId}/aging/live");
+
+        Assert.Equal(300m, live!.Days30);
+        Assert.Equal(0m, live.CurrentAmount);
+        Assert.Equal(0m, live.Days60);
+    }
+
+    [Fact]
+    public async Task A_load_delivered_before_its_promised_window_end_counts_as_on_time()
+    {
+        var before = await GetOnTimeDeliverySummaryAsync();
+
+        var clientId = await _fx.CreateClientAsync(Guid.NewGuid().ToString("N")[..8]);
+        var loadId = await _fx.CreateLoadAsync(clientId, $"OTDOK-{Guid.NewGuid():N}", deliveryWindowEnd: DateTimeOffset.UtcNow.AddDays(7));
+        var legResponse = await _fx.AddOwnFleetLegAsync(loadId);
+        legResponse.EnsureSuccessStatusCode();
+        var legId = (await legResponse.Content.ReadFromJsonAsync<IdDto>())!.Id;
+        await _fx.DeliverLegAsync(loadId, legId);
+
+        var after = await GetOnTimeDeliverySummaryAsync();
+
+        Assert.Equal(before.OnTimeCount + 1, after.OnTimeCount);
+        Assert.Equal(before.LateCount, after.LateCount);
+    }
+
+    [Fact]
+    public async Task A_load_delivered_after_its_promised_window_end_counts_as_late()
+    {
+        var before = await GetOnTimeDeliverySummaryAsync();
+
+        var clientId = await _fx.CreateClientAsync(Guid.NewGuid().ToString("N")[..8]);
+        var loadId = await _fx.CreateLoadAsync(clientId, $"OTDLATE-{Guid.NewGuid():N}", deliveryWindowEnd: DateTimeOffset.UtcNow.AddDays(-7));
+        var legResponse = await _fx.AddOwnFleetLegAsync(loadId);
+        legResponse.EnsureSuccessStatusCode();
+        var legId = (await legResponse.Content.ReadFromJsonAsync<IdDto>())!.Id;
+        await _fx.DeliverLegAsync(loadId, legId);
+
+        var after = await GetOnTimeDeliverySummaryAsync();
+
+        Assert.Equal(before.OnTimeCount, after.OnTimeCount);
+        Assert.Equal(before.LateCount + 1, after.LateCount);
+    }
+
+    [Fact]
+    public async Task A_load_with_no_delivery_window_is_never_counted_either_way()
+    {
+        var before = await GetOnTimeDeliverySummaryAsync();
+
+        var clientId = await _fx.CreateClientAsync(Guid.NewGuid().ToString("N")[..8]);
+        var (loadId, legId) = await _fx.CreateBookedLoadWithLegAsync(clientId, $"OTDNONE-{Guid.NewGuid():N}");
+        await _fx.DeliverLegAsync(loadId, legId);
+
+        var after = await GetOnTimeDeliverySummaryAsync();
+
+        Assert.Equal(before.OnTimeCount, after.OnTimeCount);
+        Assert.Equal(before.LateCount, after.LateCount);
+    }
 
     [Fact]
     public async Task Margin_summary_reports_the_reporting_currency_and_reflects_this_companys_own_currency()
@@ -231,4 +397,10 @@ public class DashboardTests
     private sealed record CurrencyExposureDto(Guid CurrencyId, decimal TotalCreditLimit, decimal TotalArOutstanding, decimal TotalWip, decimal TotalExposure);
     private sealed record CreditExposureSummaryDto(List<CurrencyExposureDto> ByCurrency);
     private sealed record PayablesSummaryDto(int Accrued, int AvailableToExport, int Exported, int Paid);
+    private sealed record CurrencyAgingDto(Guid CurrencyId, decimal CurrentAmount, decimal Days30, decimal Days60, decimal Days90, decimal Days90Plus, decimal TotalOutstanding);
+    private sealed record AgedDebtorsSummaryDto(List<CurrencyAgingDto> ByCurrency);
+    private sealed record ClientAgingDto(decimal CurrentAmount, decimal Days30, decimal Days60, decimal Days90, decimal Days90Plus, decimal TotalOutstanding);
+    private sealed record OnTimeDeliverySummaryDto(int OnTimeCount, int LateCount, decimal? OnTimeRatePercent);
+    private sealed record InvoiceLineDto(Guid Id);
+    private sealed record InvoiceDetailDto(Guid Id, List<InvoiceLineDto> Lines);
 }

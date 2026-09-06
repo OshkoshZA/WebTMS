@@ -2,6 +2,7 @@ using Asp.Versioning;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using Tms.Api.Services;
 using Tms.Infrastructure;
 using Tms.Modules.Audit;
 using Tms.Modules.Billing;
@@ -28,12 +29,14 @@ public class FinancialPeriodsController : ControllerBase
     private readonly TmsDbContext _db;
     private readonly ICurrentUserAccessor _currentUser;
     private readonly ITenantContext _tenantContext;
+    private readonly DebtorsAgingService _aging;
 
-    public FinancialPeriodsController(TmsDbContext db, ICurrentUserAccessor currentUser, ITenantContext tenantContext)
+    public FinancialPeriodsController(TmsDbContext db, ICurrentUserAccessor currentUser, ITenantContext tenantContext, DebtorsAgingService aging)
     {
         _db = db;
         _currentUser = currentUser;
         _tenantContext = tenantContext;
+        _aging = aging;
     }
 
     /// <summary>Never part of either portal's documented scope — the Company's own financial-calendar structure, so any portal contact is Forbidden outright, same as DebtorsAging below.</summary>
@@ -61,10 +64,13 @@ public class FinancialPeriodsController : ControllerBase
     /// <summary>
     /// Closes an Open period and opens the next one as a single operation (§10.3), so
     /// there is never a gap with nothing open to post into. Also writes every Client's
-    /// DebtorsAgingSnapshot for this period, rolling their prior snapshot's buckets
-    /// forward one step. The pre-close checklist described in §10.3 (draft invoices,
-    /// unmatched accruals, open exceptions) is deferred until Invoice/SubcontractorAccrual/
-    /// Exception exist to actually check — nothing to gate on yet.
+    /// DebtorsAgingSnapshot for this period, computed for real from that Client's actual
+    /// Issued/PartPaid invoices as of this period's own EndDate (DebtorsAgingService) —
+    /// no longer the roll-forward placeholder that shifted whatever the prior snapshot
+    /// held with a permanently-zero "new Current" bucket. The pre-close checklist
+    /// described in §10.3 (draft invoices, unmatched accruals, open exceptions) is
+    /// deferred until Invoice/SubcontractorAccrual/Exception exist to actually check —
+    /// nothing to gate on yet.
     /// </summary>
     [HttpPost("{id:guid}/close")]
     [Authorize(Policy = "finance.period.close")]
@@ -191,46 +197,36 @@ public class FinancialPeriodsController : ControllerBase
     }
 
     /// <summary>
-    /// Rolls every Client's aged-debtors bucket forward one step (§10.3: Current->30->60->90->90+, 90+ stays).
-    /// Fetches every relevant client's most recent snapshot in one round trip rather than one
-    /// query per client — with this company's Clients table now numbering in the thousands, the
-    /// old per-client loop held the period-claiming transaction's locks for long enough that a
-    /// second, concurrent Close request's own read could hit its command timeout and surface as a
-    /// raw 500 instead of the clean 409 Conflict the atomic claim above is meant to guarantee it.
+    /// Writes every Client's real aged-debtors buckets for this period close (§10.3),
+    /// computed as of this period's own EndDate via DebtorsAgingService — one bulk
+    /// computation across every Client at once, not a query (or, before this fix, a
+    /// second bulk query for the prior snapshot to roll forward) per client. With this
+    /// company's Clients table now numbering in the thousands, a per-client loop held
+    /// the period-claiming transaction's locks for long enough that a second, concurrent
+    /// Close request's own read could hit its command timeout and surface as a raw 500
+    /// instead of the clean 409 Conflict the atomic claim above is meant to guarantee it.
     /// </summary>
     private async Task WriteDebtorsAgingSnapshotsAsync(FinancialPeriod closingPeriod, CancellationToken ct)
     {
         var clientIds = await _db.Clients.Select(c => c.Id).ToListAsync(ct);
-
-        var priorByClient = (await _db.DebtorsAgingSnapshots
-                .Where(s => clientIds.Contains(s.ClientId))
-                .Select(s => new { s.ClientId, s.SnapshotDate, s.CurrentAmount, s.Days30, s.Days60, s.Days90, s.Days90Plus })
-                .ToListAsync(ct))
-            .GroupBy(s => s.ClientId)
-            .ToDictionary(g => g.Key, g => g.OrderByDescending(s => s.SnapshotDate).First());
+        var bucketsByClient = await _aging.ComputeForClientsAsync(clientIds, closingPeriod.EndDate, ct);
 
         foreach (var clientId in clientIds)
         {
-            priorByClient.TryGetValue(clientId, out var prior);
-
-            // TODO (§10.1): "new Current" is the sum of invoices raised in the period
-            // just closed — 0 until Invoice exists. See the class doc comment on
-            // DebtorsAgingSnapshot.
-            var snapshot = new DebtorsAgingSnapshot
+            var buckets = bucketsByClient[clientId];
+            _db.DebtorsAgingSnapshots.Add(new DebtorsAgingSnapshot
             {
                 TenantId = closingPeriod.TenantId,
                 CompanyId = closingPeriod.CompanyId,
                 ClientId = clientId,
                 FinancialPeriodId = closingPeriod.Id,
-                CurrentAmount = 0m,
-                Days30 = prior?.CurrentAmount ?? 0m,
-                Days60 = prior?.Days30 ?? 0m,
-                Days90 = prior?.Days60 ?? 0m,
-                Days90Plus = (prior?.Days90 ?? 0m) + (prior?.Days90Plus ?? 0m)
-            };
-            snapshot.TotalOutstanding = snapshot.CurrentAmount + snapshot.Days30 + snapshot.Days60 + snapshot.Days90 + snapshot.Days90Plus;
-
-            _db.DebtorsAgingSnapshots.Add(snapshot);
+                CurrentAmount = buckets.CurrentAmount,
+                Days30 = buckets.Days30,
+                Days60 = buckets.Days60,
+                Days90 = buckets.Days90,
+                Days90Plus = buckets.Days90Plus,
+                TotalOutstanding = buckets.TotalOutstanding
+            });
         }
     }
 

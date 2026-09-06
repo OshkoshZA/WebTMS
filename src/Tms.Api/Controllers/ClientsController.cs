@@ -31,14 +31,17 @@ public class ClientsController : ControllerBase
     private readonly ITenantContext _tenantContext;
     private readonly CreditExposureService _creditExposure;
     private readonly IAuthorizationService _authorizationService;
+    private readonly DebtorsAgingService _aging;
 
     public ClientsController(
-        TmsDbContext db, ITenantContext tenantContext, CreditExposureService creditExposure, IAuthorizationService authorizationService)
+        TmsDbContext db, ITenantContext tenantContext, CreditExposureService creditExposure, IAuthorizationService authorizationService,
+        DebtorsAgingService aging)
     {
         _db = db;
         _tenantContext = tenantContext;
         _creditExposure = creditExposure;
         _authorizationService = authorizationService;
+        _aging = aging;
     }
 
     /// <summary>
@@ -133,6 +136,25 @@ public class ClientsController : ControllerBase
             return BadRequest($"Client is not permitted to transact in currency {resolvedCurrencyId}.");
 
         return Ok(await _creditExposure.GetStatusAsync(client, resolvedCurrencyId, ct));
+    }
+
+    /// <summary>
+    /// This client's aged-debtors position computed live, as of today (§10.3) — unlike
+    /// FinancialPeriodsController's own /debtors-aging, which only ever shows a past
+    /// period's fixed snapshot, this recomputes from today's actual Issued/PartPaid
+    /// invoices every time it's called, closing the "only ever stale" gap both the
+    /// internal dashboard (§16.2) and this client's own Customer Portal dashboard
+    /// (§16.3) had documented. Same portal-access rule as CreditStatus above.
+    /// </summary>
+    [HttpGet("{id:guid}/aging/live")]
+    public async Task<ActionResult<ClientAgingBuckets>> LiveAging(Guid id, CancellationToken ct)
+    {
+        if (!await _db.Clients.AnyAsync(c => c.Id == id, ct)) return NotFound();
+
+        var portalCheck = await CheckPortalClientAccessAsync(id, "portal.client.viewloads");
+        if (portalCheck is not null) return portalCheck;
+
+        return Ok(await _aging.ComputeForClientAsync(id, DateOnly.FromDateTime(DateTime.UtcNow), ct));
     }
 
     /// <summary>Currencies this client is permitted to transact in, beyond its primary — its own CurrencyId is always implicitly allowed and isn't listed here (docs/architecture.html §4.3).</summary>

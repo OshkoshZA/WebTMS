@@ -2,6 +2,7 @@ using Asp.Versioning;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using Tms.Api.Services;
 using Tms.Infrastructure;
 using Tms.Modules.Billing;
 using Tms.Modules.Loads;
@@ -22,6 +23,13 @@ public record CurrencyExposureTotal(
 public record CreditExposureSummaryResponse(IReadOnlyList<CurrencyExposureTotal> ByCurrency);
 
 public record PayablesSummaryResponse(int Accrued, int AvailableToExport, int Exported, int Paid);
+
+public record CurrencyAgingTotal(
+    Guid CurrencyId, decimal CurrentAmount, decimal Days30, decimal Days60, decimal Days90, decimal Days90Plus, decimal TotalOutstanding);
+
+public record AgedDebtorsSummaryResponse(IReadOnlyList<CurrencyAgingTotal> ByCurrency);
+
+public record OnTimeDeliverySummaryResponse(int OnTimeCount, int LateCount, decimal? OnTimeRatePercent);
 
 /// <summary>
 /// Company-wide KPI aggregates for the internal dashboard's own "known, bounded gap"
@@ -48,11 +56,13 @@ public class DashboardController : ControllerBase
 
     private readonly TmsDbContext _db;
     private readonly ITenantContext _tenantContext;
+    private readonly DebtorsAgingService _aging;
 
-    public DashboardController(TmsDbContext db, ITenantContext tenantContext)
+    public DashboardController(TmsDbContext db, ITenantContext tenantContext, DebtorsAgingService aging)
     {
         _db = db;
         _tenantContext = tenantContext;
+        _aging = aging;
     }
 
     /// <summary>
@@ -198,5 +208,66 @@ public class DashboardController : ControllerBase
         var paid = await _db.SubcontractorExpenses.CountAsync(e => e.Status == SubcontractorExpenseStatus.Paid, ct);
 
         return Ok(new PayablesSummaryResponse(accrued, availableToExport, exported, paid));
+    }
+
+    /// <summary>
+    /// Aged debtors, computed live as of today rather than read from whatever the last
+    /// period close happened to snapshot (§10.3, §16.2) — grouped by currency, never
+    /// blended (§4.3), and with none of ClientsController.LiveAging's own primary-
+    /// currency-only limitation (see DebtorsAgingService's own doc comment).
+    /// </summary>
+    [HttpGet("aged-debtors-summary")]
+    public async Task<ActionResult<AgedDebtorsSummaryResponse>> AgedDebtorsSummary(CancellationToken ct)
+    {
+        if (_tenantContext.SubcontractorId is not null || _tenantContext.ClientId is not null) return Forbid();
+
+        var buckets = await _aging.ComputeCompanyWideByCurrencyAsync(DateOnly.FromDateTime(DateTime.UtcNow), ct);
+        var byCurrency = buckets
+            .Select(b => new CurrencyAgingTotal(b.CurrencyId, b.CurrentAmount, b.Days30, b.Days60, b.Days90, b.Days90Plus, b.TotalOutstanding))
+            .ToList();
+
+        return Ok(new AgedDebtorsSummaryResponse(byCurrency));
+    }
+
+    /// <summary>
+    /// The share of Delivered loads that reached Delivered at or before their own
+    /// promised DeliveryWindowEnd (§16.2) — both halves of "promised vs. actual" already
+    /// existed in the schema (Load.DeliveryWindowEnd, and LoadStatusHistory's own
+    /// ChangedAt for the transition to Delivered), just never connected to each other. A
+    /// load with no DeliveryWindowEnd set can't be judged either way and is excluded
+    /// from both the counts and the rate entirely, rather than counted as on-time by
+    /// default or penalized for a promise that was never made. OnTimeRatePercent is null
+    /// (not 0) when there's nothing ratable yet, so the frontend can tell "no data" apart
+    /// from "a real 0%".
+    /// </summary>
+    [HttpGet("on-time-delivery-summary")]
+    public async Task<ActionResult<OnTimeDeliverySummaryResponse>> OnTimeDeliverySummary(CancellationToken ct)
+    {
+        if (_tenantContext.SubcontractorId is not null || _tenantContext.ClientId is not null) return Forbid();
+
+        var deliveredAtByLoadId = await _db.LoadStatusHistories
+            .Where(h => h.ToStatus == LoadStatus.Delivered)
+            .GroupBy(h => h.LoadId)
+            .Select(g => new { LoadId = g.Key, DeliveredAt = g.Min(h => h.ChangedAt) })
+            .ToDictionaryAsync(x => x.LoadId, x => x.DeliveredAt, ct);
+
+        var deliveredLoadIds = deliveredAtByLoadId.Keys.ToList();
+        var ratableLoads = await _db.Loads
+            .Where(l => l.DeliveryWindowEnd != null && deliveredLoadIds.Contains(l.Id))
+            .Select(l => new { l.Id, l.DeliveryWindowEnd })
+            .ToListAsync(ct);
+
+        var onTimeCount = 0;
+        var lateCount = 0;
+        foreach (var load in ratableLoads)
+        {
+            if (deliveredAtByLoadId[load.Id] <= load.DeliveryWindowEnd!.Value) onTimeCount++;
+            else lateCount++;
+        }
+
+        var total = onTimeCount + lateCount;
+        var ratePercent = total == 0 ? (decimal?)null : Math.Round(100m * onTimeCount / total, 1);
+
+        return Ok(new OnTimeDeliverySummaryResponse(onTimeCount, lateCount, ratePercent));
     }
 }

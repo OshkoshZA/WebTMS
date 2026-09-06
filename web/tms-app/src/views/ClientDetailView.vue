@@ -10,7 +10,7 @@ import { ApiError } from '../api/client'
 import { useAuthStore } from '../stores/auth'
 import {
   ACTIVE_DEACTIVATED, CREDIT_NOTE_STATUS, INVOICE_STATUS, label,
-  type Client, type ClientCurrency, type CreditNote, type CreditStatus, type Currency, type Invoice,
+  type Client, type ClientAgingBuckets, type ClientCurrency, type CreditNote, type CreditStatus, type Currency, type Invoice,
   type PortalContact, type Role,
 } from '../api/types'
 import { activeDeactivatedTone, creditNoteStatusTone, formatDate, formatMoney, invoiceStatusTone } from '../lib/presentation'
@@ -22,6 +22,7 @@ const client = ref<Client | null>(null)
 const currencies = ref<Currency[]>([])
 const clientCurrencies = ref<ClientCurrency[]>([])
 const creditStatus = ref<CreditStatus | null>(null)
+const liveAging = ref<ClientAgingBuckets | null>(null)
 const invoices = ref<Invoice[]>([])
 const creditNotes = ref<CreditNote[]>([])
 const contacts = ref<PortalContact[]>([])
@@ -60,8 +61,9 @@ async function loadEverything() {
     const [clientData, currencyList] = await Promise.all([clientsApi.get(props.id), referenceApi.currencies()])
     client.value = clientData
     currencies.value = currencyList
-    const [statusData, currencyRows, invoiceList, creditNoteList, contactList, roleList] = await Promise.all([
+    const [statusData, agingData, currencyRows, invoiceList, creditNoteList, contactList, roleList] = await Promise.all([
       clientsApi.creditStatus(props.id),
+      clientsApi.liveAging(props.id),
       clientsApi.currencies(props.id),
       clientsApi.invoices(props.id),
       clientsApi.creditNotes(props.id),
@@ -69,6 +71,7 @@ async function loadEverything() {
       rolesApi.list(),
     ])
     creditStatus.value = statusData
+    liveAging.value = agingData
     clientCurrencies.value = currencyRows
     invoices.value = invoiceList
     creditNotes.value = creditNoteList
@@ -271,6 +274,31 @@ function toggleContactActive(contact: PortalContact) {
           <dd class="font-medium" :class="creditStatus.availableCredit < 0 ? 'text-rose-700' : 'text-slate-900'">
             {{ formatMoney(creditStatus.availableCredit, primaryCurrencyCode) }}
           </dd>
+        </div>
+      </dl>
+
+      <h2 class="mt-8 text-lg font-semibold text-slate-900">Debtors aging (live)</h2>
+      <p class="mt-1 text-xs text-slate-500">Computed as of today, not the last financial period close — see the Financial Calendar screen for a past period's own fixed snapshot.</p>
+      <dl v-if="liveAging" class="mt-3 grid grid-cols-2 gap-4 rounded-lg border border-slate-200 bg-white p-4 text-sm sm:grid-cols-5">
+        <div>
+          <dt class="text-slate-500">Current</dt>
+          <dd class="text-slate-900">{{ formatMoney(liveAging.currentAmount, primaryCurrencyCode) }}</dd>
+        </div>
+        <div>
+          <dt class="text-slate-500">30 days</dt>
+          <dd class="text-slate-900">{{ formatMoney(liveAging.days30, primaryCurrencyCode) }}</dd>
+        </div>
+        <div>
+          <dt class="text-slate-500">60 days</dt>
+          <dd class="text-slate-900">{{ formatMoney(liveAging.days60, primaryCurrencyCode) }}</dd>
+        </div>
+        <div>
+          <dt class="text-slate-500">90 days</dt>
+          <dd class="text-slate-900">{{ formatMoney(liveAging.days90, primaryCurrencyCode) }}</dd>
+        </div>
+        <div>
+          <dt class="text-slate-500">90+ days</dt>
+          <dd class="font-medium text-slate-900">{{ formatMoney(liveAging.days90Plus, primaryCurrencyCode) }}</dd>
         </div>
       </dl>
 

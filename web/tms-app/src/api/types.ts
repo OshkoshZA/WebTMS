@@ -844,6 +844,35 @@ export interface PayablesSummary {
   paid: number
 }
 
+export interface CurrencyAgingTotal {
+  currencyId: string
+  currentAmount: number
+  days30: number
+  days60: number
+  days90: number
+  days90Plus: number
+  totalOutstanding: number
+}
+
+export interface AgedDebtorsSummary {
+  byCurrency: CurrencyAgingTotal[]
+}
+
+export interface ClientAgingBuckets {
+  currentAmount: number
+  days30: number
+  days60: number
+  days90: number
+  days90Plus: number
+  totalOutstanding: number
+}
+
+export interface OnTimeDeliverySummary {
+  onTimeCount: number
+  lateCount: number
+  onTimeRatePercent: number | null
+}
+
 export interface SubcontractorAccrual {
   id: string
   rateLineBuyId: string

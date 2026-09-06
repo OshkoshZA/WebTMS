@@ -107,7 +107,8 @@ public class StaffTestFixture : IAsyncLifetime
     }
 
     public async Task<Guid> CreateLoadAsync(
-        Guid clientId, string referenceNo, string? creditOverrideReason = null, DateTimeOffset? pickupWindowStart = null)
+        Guid clientId, string referenceNo, string? creditOverrideReason = null, DateTimeOffset? pickupWindowStart = null,
+        DateTimeOffset? deliveryWindowEnd = null)
     {
         var response = await StaffClient.PostAsJsonAsync("/api/v1/loads", new
         {
@@ -115,7 +116,8 @@ public class StaffTestFixture : IAsyncLifetime
             referenceNo,
             loadTypeId = Guid.Parse(LoadTypeId),
             creditOverrideReason,
-            pickupWindowStart
+            pickupWindowStart,
+            deliveryWindowEnd
         });
         response.EnsureSuccessStatusCode();
         return (await response.Content.ReadFromJsonAsync<IdDto>())!.Id;

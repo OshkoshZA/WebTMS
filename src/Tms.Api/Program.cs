@@ -34,6 +34,7 @@ builder.Services.AddScoped<AuditSaveChangesInterceptor>();
 builder.Services.AddScoped<Tms.Api.Auth.JwtTokenService>();
 builder.Services.AddScoped<Tms.Api.Auth.RefreshTokenService>();
 builder.Services.AddScoped<Tms.Api.Services.CreditExposureService>();
+builder.Services.AddScoped<Tms.Api.Services.DebtorsAgingService>();
 builder.Services.AddScoped<Tms.Api.Services.LoadStatusService>();
 builder.Services.AddScoped<Tms.Api.Services.DebriefApprovalService>();
 builder.Services.AddScoped<Tms.Api.Services.ExceptionService>();

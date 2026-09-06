@@ -71,13 +71,26 @@ public class WebhookRetryJobTests : IAsyncLifetime
     }
 
     /// <summary>Bypasses the real 1-minute-plus backoff so a test doesn't need to sleep for it — same IsPlatformSupport side-channel WebhookRetryJob itself uses, since this reaches TmsDbContext directly rather than through a request.</summary>
-    private async Task ForceNextAttemptIntoThePastAsync(Guid deliveryId)
+    private Task ForceNextAttemptIntoThePastAsync(Guid deliveryId) => SetNextAttemptAsync(deliveryId, DateTimeOffset.UtcNow.AddMinutes(-1));
+
+    /// <summary>
+    /// Pins NextAttemptAtUtc comfortably beyond any real backoff step (§11.3's own
+    /// longest is 12 hours) so a "not due" assertion can never flake into "actually due"
+    /// no matter how long a slow, shared, full-suite run takes to reach it — this is the
+    /// fix for a real flake this exact test surfaced (WebhookDeliveryService's own
+    /// ~1-minute first backoff had, in fact, elapsed by the time a slow full run's own
+    /// sweep call ran, making the delivery genuinely due and retried — correct job
+    /// behavior, just not what "not yet due" was supposed to be testing).
+    /// </summary>
+    private Task ForceNextAttemptFarIntoTheFutureAsync(Guid deliveryId) => SetNextAttemptAsync(deliveryId, DateTimeOffset.UtcNow.AddDays(1));
+
+    private async Task SetNextAttemptAsync(Guid deliveryId, DateTimeOffset nextAttemptAtUtc)
     {
         using var scope = _fx.Services.CreateScope();
         scope.ServiceProvider.GetRequiredService<HttpTenantContext>().IsPlatformSupport = true;
         var db = scope.ServiceProvider.GetRequiredService<TmsDbContext>();
         var delivery = await db.WebhookDeliveries.FirstAsync(d => d.Id == deliveryId);
-        delivery.NextAttemptAtUtc = DateTimeOffset.UtcNow.AddMinutes(-1);
+        delivery.NextAttemptAtUtc = nextAttemptAtUtc;
         await db.SaveChangesAsync();
     }
 
@@ -115,7 +128,7 @@ public class WebhookRetryJobTests : IAsyncLifetime
         await IssueCreditNoteAsync();
         var delivery = await GetOnlyDeliveryAsync(subscriptionId);
         Assert.NotNull(delivery.NextAttemptAtUtc);
-        Assert.True(delivery.NextAttemptAtUtc > DateTimeOffset.UtcNow); // the real ~1-minute backoff, untouched
+        await ForceNextAttemptFarIntoTheFutureAsync(delivery.Id);
 
         receiver.RespondWith(200);
         var job = _fx.Services.GetRequiredService<WebhookRetryJob>();

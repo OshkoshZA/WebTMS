@@ -59,14 +59,15 @@ public class FinancialPeriod : CompanyScopedEntity
 /// <summary>
 /// A Client's aged-debtors position at exactly one period close (§10.3) — a permanent,
 /// period-stamped record, so an aged-debtors report for a past period is a lookup, not
-/// a recalculation against today's data. Bucket rollover happens once per period close:
-/// Current -> 30 -> 60 -> 90 -> 90+ (stays), written by FinancialPeriodsController.Close.
-///
-/// CurrentAmount is 0 for now: it should be the sum of invoices raised in the period
-/// just closed, but Invoice doesn't exist yet (§10.1, a later phase of this same
-/// module). Every other bucket still rolls forward correctly from the prior snapshot
-/// regardless — exactly like CreditExposureService's AR Outstanding, which becomes real
-/// the same way once Invoice lands, with no change needed here.
+/// a recalculation against today's data. Written by FinancialPeriodsController.Close,
+/// via Tms.Api.Services.DebtorsAgingService, which buckets that Client's actual Issued/
+/// PartPaid invoices by days overdue against each one's own DueDate as of this period's
+/// EndDate — real data, not a roll-forward of the prior snapshot's own buckets (an
+/// earlier placeholder here permanently zeroed the "new Current" bucket, written before
+/// Invoice existed to compute it from and never revisited once it did). No CurrencyId
+/// of its own — one row per Client per Period assumes that Client's own primary
+/// currency; see DebtorsAgingService's own doc comment for what that means for a
+/// Client transacting in more than one.
 /// </summary>
 public class DebtorsAgingSnapshot : CompanyScopedEntity
 {

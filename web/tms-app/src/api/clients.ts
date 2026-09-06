@@ -1,6 +1,6 @@
 import { api } from './client'
 import type {
-  Client, ClientCurrency, CreateClientRequest, CreatePortalContactRequest, CreditNote, CreditStatus, Invoice,
+  Client, ClientAgingBuckets, ClientCurrency, CreateClientRequest, CreatePortalContactRequest, CreditNote, CreditStatus, Invoice,
   PortalContact, UpdateClientRequest,
 } from './types'
 
@@ -13,6 +13,7 @@ export const clientsApi = {
   reactivate: (id: string) => api.post<void>(`/clients/${id}/reactivate`),
   creditStatus: (id: string, currencyId?: string) =>
     api.get<CreditStatus>(`/clients/${id}/credit-status${currencyId ? `?currencyId=${currencyId}` : ''}`),
+  liveAging: (id: string) => api.get<ClientAgingBuckets>(`/clients/${id}/aging/live`),
   currencies: (id: string) => api.get<ClientCurrency[]>(`/clients/${id}/currencies`),
   addCurrency: (id: string, currencyId: string, creditLimit: number) =>
     api.post<ClientCurrency>(`/clients/${id}/currencies`, { currencyId, creditLimit }),
