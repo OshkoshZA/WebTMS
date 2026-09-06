@@ -70,6 +70,12 @@ export function financialCalendarStatusTone(status: number): Tone {
   return status === 0 ? 'neutral' : status === 1 ? 'success' : 'info'
 }
 
+// ApiClient's own Active|Revoked — one-directional, unlike activeDeactivatedTone's
+// pair (no reverse action exists), but the same two colors read correctly either way.
+export function apiClientStatusTone(status: number): Tone {
+  return status === 0 ? 'success' : 'danger'
+}
+
 export function formatMoney(amount: number, currencyCode: string): string {
   return `${amount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ${currencyCode}`
 }

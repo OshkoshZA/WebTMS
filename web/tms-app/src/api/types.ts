@@ -35,6 +35,10 @@ export const FINANCIAL_YEAR_STATUS = ['Future', 'Open', 'Closed'] as const
 
 export const FINANCIAL_PERIOD_STATUS = ['Future', 'Open', 'Closed'] as const
 
+// Two-state, but one-directional unlike ACTIVE_DEACTIVATED — there is no "reactivate"
+// for an ApiClient, only Create (a new one) — RevokeApiClient has no reverse action.
+export const API_CLIENT_STATUS = ['Active', 'Revoked'] as const
+
 export function label(values: readonly string[], value: number): string {
   return values[value] ?? `Unknown (${value})`
 }
@@ -515,6 +519,35 @@ export interface CreatePortalContactRequest {
   password: string
   displayName: string
   roleId: string
+}
+
+export interface ApiClient {
+  id: string
+  name: string
+  clientId: string
+  status: number // API_CLIENT_STATUS
+  rateLimitPerMinute: number
+  createdAt: string
+}
+
+export interface CreateApiClientRequest {
+  name: string
+  roleId: string
+  rateLimitPerMinute?: number
+}
+
+// The one and only time a plaintext secret is ever returned — Create/RotateSecret's
+// own response shapes, never part of the plain ApiClient the list/detail views use.
+export interface CreateApiClientResponse {
+  id: string
+  name: string
+  clientId: string
+  clientSecret: string
+  rateLimitPerMinute: number
+}
+
+export interface RotateSecretResponse {
+  clientSecret: string
 }
 
 export interface ExceptionRecord {
