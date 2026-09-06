@@ -427,6 +427,27 @@ export interface CreditNote {
   lines: CreditNoteLine[]
 }
 
+export interface GenerateInvoiceRequest {
+  clientId: string
+  currencyId?: string
+  issueDate?: string
+}
+
+export interface CreateCreditNoteLineRequest {
+  invoiceLineId?: string
+  description: string
+  amount: number
+}
+
+export interface CreateCreditNoteRequest {
+  clientId: string
+  originalInvoiceId?: string
+  reason: string
+  currencyId?: string
+  lines: CreateCreditNoteLineRequest[]
+  issueDate?: string
+}
+
 export interface LoadConfirmation {
   id: string
   loadLegId: string

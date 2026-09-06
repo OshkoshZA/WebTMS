@@ -27,6 +27,12 @@ async function logout() {
             <router-link to="/debriefs" class="text-slate-600 hover:text-slate-900" active-class="font-semibold text-slate-900">
               Debriefs
             </router-link>
+            <router-link to="/invoices" class="text-slate-600 hover:text-slate-900" active-class="font-semibold text-slate-900">
+              Invoices
+            </router-link>
+            <router-link to="/credit-notes" class="text-slate-600 hover:text-slate-900" active-class="font-semibold text-slate-900">
+              Credit notes
+            </router-link>
             <router-link to="/clients" class="text-slate-600 hover:text-slate-900" active-class="font-semibold text-slate-900">
               Clients
             </router-link>
