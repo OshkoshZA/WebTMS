@@ -501,6 +501,22 @@ export interface AddCompanyRoleRequest {
   roleId: string
 }
 
+// Shared by ClientContactResponse/SubcontractorContactResponse — identical shapes,
+// each backed by the same ApplicationUser table as an internal User (§13.1).
+export interface PortalContact {
+  id: string
+  email: string
+  displayName: string
+  status: number // ACTIVE_DEACTIVATED
+}
+
+export interface CreatePortalContactRequest {
+  email: string
+  password: string
+  displayName: string
+  roleId: string
+}
+
 export interface ExceptionRecord {
   id: string
   category: string

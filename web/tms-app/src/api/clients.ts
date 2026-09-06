@@ -1,5 +1,8 @@
 import { api } from './client'
-import type { Client, ClientCurrency, CreateClientRequest, CreditNote, CreditStatus, Invoice, UpdateClientRequest } from './types'
+import type {
+  Client, ClientCurrency, CreateClientRequest, CreatePortalContactRequest, CreditNote, CreditStatus, Invoice,
+  PortalContact, UpdateClientRequest,
+} from './types'
 
 export const clientsApi = {
   list: () => api.get<Client[]>('/clients'),
@@ -19,4 +22,9 @@ export const clientsApi = {
   // (InvoicesController/CreditNotesController's own Draft-visibility rule).
   invoices: (id: string) => api.get<Invoice[]>(`/clients/${id}/invoices`),
   creditNotes: (id: string) => api.get<CreditNote[]>(`/clients/${id}/credit-notes`),
+  contacts: (id: string) => api.get<PortalContact[]>(`/clients/${id}/contacts`),
+  createContact: (id: string, request: CreatePortalContactRequest) =>
+    api.post<PortalContact>(`/clients/${id}/contacts`, request),
+  deactivateContact: (id: string, contactId: string) => api.post<void>(`/clients/${id}/contacts/${contactId}/deactivate`),
+  reactivateContact: (id: string, contactId: string) => api.post<void>(`/clients/${id}/contacts/${contactId}/reactivate`),
 }

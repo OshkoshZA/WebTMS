@@ -5,11 +5,13 @@ import ErrorAlert from '../components/ErrorAlert.vue'
 import StatusBadge from '../components/StatusBadge.vue'
 import { clientsApi } from '../api/clients'
 import { referenceApi } from '../api/reference'
+import { portalSafeRoles, rolesApi } from '../api/roles'
 import { ApiError } from '../api/client'
 import { useAuthStore } from '../stores/auth'
 import {
   ACTIVE_DEACTIVATED, CREDIT_NOTE_STATUS, INVOICE_STATUS, label,
   type Client, type ClientCurrency, type CreditNote, type CreditStatus, type Currency, type Invoice,
+  type PortalContact, type Role,
 } from '../api/types'
 import { activeDeactivatedTone, creditNoteStatusTone, formatDate, formatMoney, invoiceStatusTone } from '../lib/presentation'
 
@@ -22,6 +24,8 @@ const clientCurrencies = ref<ClientCurrency[]>([])
 const creditStatus = ref<CreditStatus | null>(null)
 const invoices = ref<Invoice[]>([])
 const creditNotes = ref<CreditNote[]>([])
+const contacts = ref<PortalContact[]>([])
+const roles = ref<Role[]>([])
 const expandedInvoiceId = ref<string | null>(null)
 const expandedCreditNoteId = ref<string | null>(null)
 
@@ -32,6 +36,8 @@ const actionBusy = ref(false)
 
 const canManage = computed(() => auth.hasFunction('client.master.manage'))
 const canChangeCurrency = computed(() => auth.hasFunction('client.currency.change'))
+const canManageContacts = computed(() => auth.hasFunction('client.contact.manage'))
+const portalRoles = computed(() => portalSafeRoles(roles.value, 'portal.client.'))
 
 function currencyCode(currencyId: string): string {
   return currencies.value.find((c) => c.id === currencyId)?.code ?? currencyId
@@ -54,16 +60,20 @@ async function loadEverything() {
     const [clientData, currencyList] = await Promise.all([clientsApi.get(props.id), referenceApi.currencies()])
     client.value = clientData
     currencies.value = currencyList
-    const [statusData, currencyRows, invoiceList, creditNoteList] = await Promise.all([
+    const [statusData, currencyRows, invoiceList, creditNoteList, contactList, roleList] = await Promise.all([
       clientsApi.creditStatus(props.id),
       clientsApi.currencies(props.id),
       clientsApi.invoices(props.id),
       clientsApi.creditNotes(props.id),
+      clientsApi.contacts(props.id),
+      rolesApi.list(),
     ])
     creditStatus.value = statusData
     clientCurrencies.value = currencyRows
     invoices.value = invoiceList
     creditNotes.value = creditNoteList
+    contacts.value = contactList
+    roles.value = roleList
   } catch (e) {
     error.value = e instanceof ApiError ? e.message : 'Could not load this client.'
   } finally {
@@ -143,6 +153,28 @@ function submitEditCurrency(currencyId: string) {
     await clientsApi.updateCurrency(props.id, currencyId, editingCreditLimit.value)
     editingCurrencyId.value = null
   })
+}
+
+// --- Portal contacts ---
+const addContactOpen = ref(false)
+const newContact = ref({ email: '', password: '', displayName: '', roleId: '' })
+
+function openAddContact() {
+  newContact.value = { email: '', password: '', displayName: '', roleId: '' }
+  addContactOpen.value = true
+}
+
+function submitAddContact() {
+  runAction(async () => {
+    await clientsApi.createContact(props.id, newContact.value)
+    addContactOpen.value = false
+  })
+}
+
+function toggleContactActive(contact: PortalContact) {
+  runAction(() =>
+    contact.status === 0 ? clientsApi.deactivateContact(props.id, contact.id) : clientsApi.reactivateContact(props.id, contact.id),
+  )
 }
 </script>
 
@@ -313,6 +345,88 @@ function submitEditCurrency(currencyId: string) {
             </template>
             <tr v-if="clientCurrencies.length === 0">
               <td :colspan="canChangeCurrency ? 3 : 2" class="px-4 py-6 text-center text-slate-500">No additional currencies.</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="mt-8 flex items-center justify-between">
+        <h2 class="text-lg font-semibold text-slate-900">Portal contacts</h2>
+        <button
+          v-if="canManageContacts"
+          type="button"
+          class="rounded-md border border-slate-300 px-3 py-1.5 text-sm text-slate-700 hover:bg-slate-100"
+          @click="openAddContact"
+        >
+          Add contact
+        </button>
+      </div>
+      <p class="mt-1 text-sm text-slate-500">Customer Portal logins for this client — each can only be granted a Role restricted to portal.client.* functions.</p>
+
+      <form
+        v-if="addContactOpen"
+        class="mt-3 grid max-w-xl grid-cols-2 gap-3 rounded-lg border border-slate-200 bg-white p-4"
+        @submit.prevent="submitAddContact"
+      >
+        <label class="col-span-2 flex flex-col gap-1 text-sm text-slate-700">
+          Email
+          <input v-model="newContact.email" type="email" required class="rounded-md border border-slate-300 px-3 py-2 text-sm" />
+        </label>
+        <label class="col-span-2 flex flex-col gap-1 text-sm text-slate-700">
+          Password
+          <input v-model="newContact.password" type="password" required class="rounded-md border border-slate-300 px-3 py-2 text-sm" />
+        </label>
+        <label class="col-span-2 flex flex-col gap-1 text-sm text-slate-700">
+          Display name
+          <input v-model="newContact.displayName" type="text" required class="rounded-md border border-slate-300 px-3 py-2 text-sm" />
+        </label>
+        <label class="col-span-2 flex flex-col gap-1 text-sm text-slate-700">
+          Role
+          <select v-model="newContact.roleId" required class="rounded-md border border-slate-300 px-3 py-2 text-sm">
+            <option value="" disabled>Select…</option>
+            <option v-for="r in portalRoles" :key="r.id" :value="r.id">{{ r.name }}</option>
+          </select>
+        </label>
+        <p v-if="portalRoles.length === 0" class="col-span-2 text-xs text-amber-700">
+          No role is restricted to only portal.client.* functions yet — create one on the Roles screen first.
+        </p>
+        <div class="col-span-2 flex gap-3">
+          <button type="submit" :disabled="actionBusy" class="rounded-md bg-slate-900 px-3 py-1.5 text-sm text-white disabled:opacity-50">Create</button>
+          <button type="button" class="rounded-md border border-slate-300 px-3 py-1.5 text-sm" @click="addContactOpen = false">Cancel</button>
+        </div>
+      </form>
+
+      <div class="mt-4 overflow-x-auto rounded-lg border border-slate-200 bg-white">
+        <table class="w-full text-left text-sm">
+          <thead class="border-b border-slate-200 bg-slate-50 text-xs uppercase tracking-wide text-slate-500">
+            <tr>
+              <th class="px-4 py-3">Email</th>
+              <th class="px-4 py-3">Display name</th>
+              <th class="px-4 py-3">Status</th>
+              <th v-if="canManageContacts" class="px-4 py-3">Action</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="contact in contacts" :key="contact.id" class="border-b border-slate-100 last:border-0">
+              <td class="px-4 py-3 font-medium text-slate-900">{{ contact.email }}</td>
+              <td class="px-4 py-3 text-slate-600">{{ contact.displayName }}</td>
+              <td class="px-4 py-3">
+                <StatusBadge :text="label(ACTIVE_DEACTIVATED, contact.status)" :tone="activeDeactivatedTone(contact.status)" />
+              </td>
+              <td v-if="canManageContacts" class="px-4 py-3">
+                <button
+                  type="button"
+                  :disabled="actionBusy"
+                  class="rounded-md border px-2.5 py-1 text-xs font-medium disabled:opacity-50"
+                  :class="contact.status === 0 ? 'border-rose-300 bg-rose-50 text-rose-800 hover:bg-rose-100' : 'border-sky-300 bg-sky-50 text-sky-800 hover:bg-sky-100'"
+                  @click="toggleContactActive(contact)"
+                >
+                  {{ contact.status === 0 ? 'Deactivate' : 'Reactivate' }}
+                </button>
+              </td>
+            </tr>
+            <tr v-if="contacts.length === 0">
+              <td :colspan="canManageContacts ? 4 : 3" class="px-4 py-6 text-center text-slate-500">No portal contacts.</td>
             </tr>
           </tbody>
         </table>

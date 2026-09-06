@@ -1,5 +1,8 @@
 import { api } from './client'
-import type { CreateSubcontractorRequest, Subcontractor, SubcontractorCurrency, SubcontractorLeg, UpdateSubcontractorRequest } from './types'
+import type {
+  CreatePortalContactRequest, CreateSubcontractorRequest, PortalContact, Subcontractor, SubcontractorCurrency,
+  SubcontractorLeg, UpdateSubcontractorRequest,
+} from './types'
 
 export const subcontractorsApi = {
   list: () => api.get<Subcontractor[]>('/subcontractors'),
@@ -12,4 +15,11 @@ export const subcontractorsApi = {
   addCurrency: (id: string, currencyId: string) =>
     api.post<SubcontractorCurrency>(`/subcontractors/${id}/currencies`, { currencyId }),
   legs: (id: string) => api.get<SubcontractorLeg[]>(`/subcontractors/${id}/legs`),
+  contacts: (id: string) => api.get<PortalContact[]>(`/subcontractors/${id}/contacts`),
+  createContact: (id: string, request: CreatePortalContactRequest) =>
+    api.post<PortalContact>(`/subcontractors/${id}/contacts`, request),
+  deactivateContact: (id: string, contactId: string) =>
+    api.post<void>(`/subcontractors/${id}/contacts/${contactId}/deactivate`),
+  reactivateContact: (id: string, contactId: string) =>
+    api.post<void>(`/subcontractors/${id}/contacts/${contactId}/reactivate`),
 }
