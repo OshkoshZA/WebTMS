@@ -364,6 +364,14 @@ function addDebriefExpense() {
 function removeDebriefExpense(index: number) {
   debriefExpenses.value.splice(index, 1)
 }
+// DebriefApprovalService adds an accrual-claimed expense's Amount straight onto that
+// accrual's own EstimatedAmount with no currency check of its own (mirrors the
+// currency filtering SupplierInvoiceDetailView.vue does for its own accrual picker) —
+// so a mismatched-currency pick here would silently corrupt the accrual's estimate
+// rather than error.
+function accrualsForExpense(expense: ExpenseDraft): SubcontractorAccrual[] {
+  return carrierAccruals.value.filter((a) => a.currencyId === expense.currencyId)
+}
 function toOptionalNumber(value: string | number): number | undefined {
   if (typeof value === 'number') return value
   const trimmed = value.trim()
@@ -1030,8 +1038,10 @@ async function submitCarrierDebrief() {
                                 v-model="expense.accrualId"
                                 class="rounded-md border border-slate-300 px-2 py-1.5 text-sm"
                               >
-                                <option value="" disabled>Accrual…</option>
-                                <option v-for="a in carrierAccruals" :key="a.id" :value="a.id">
+                                <option value="" disabled>
+                                  {{ expense.currencyId ? 'Accrual…' : 'Pick a currency first…' }}
+                                </option>
+                                <option v-for="a in accrualsForExpense(expense)" :key="a.id" :value="a.id">
                                   {{ formatMoney(a.estimatedAmount, currencyCode(a.currencyId)) }} — {{ a.accrualDate }}
                                 </option>
                               </select>
