@@ -76,6 +76,21 @@ export function apiClientStatusTone(status: number): Tone {
   return status === 0 ? 'success' : 'danger'
 }
 
+// WebhookSubscription's own Active|Disabled — same one-directional shape as ApiClient.
+export function webhookSubscriptionStatusTone(status: number): Tone {
+  return status === 0 ? 'success' : 'danger'
+}
+
+export function webhookDeliveryStatusTone(status: number): Tone {
+  return status === 0 ? 'neutral' : status === 1 ? 'success' : 'danger'
+}
+
+// DataSubjectRequest's own Received|InProgress|Fulfilled|Rejected (§14.3) — InProgress
+// is never actually set by the backend today, but still gets a color for completeness.
+export function dsrStatusTone(status: number): Tone {
+  return status === 0 ? 'warning' : status === 1 ? 'info' : status === 2 ? 'success' : 'danger'
+}
+
 export function formatMoney(amount: number, currencyCode: string): string {
   return `${amount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ${currencyCode}`
 }

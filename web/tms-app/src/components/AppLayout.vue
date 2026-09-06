@@ -72,6 +72,15 @@ async function logout() {
             <router-link to="/api-clients" class="text-slate-600 hover:text-slate-900" active-class="font-semibold text-slate-900">
               API clients
             </router-link>
+            <router-link to="/webhooks" class="text-slate-600 hover:text-slate-900" active-class="font-semibold text-slate-900">
+              Webhooks
+            </router-link>
+            <router-link to="/retention-policies" class="text-slate-600 hover:text-slate-900" active-class="font-semibold text-slate-900">
+              Retention policies
+            </router-link>
+            <router-link to="/data-subject-requests" class="text-slate-600 hover:text-slate-900" active-class="font-semibold text-slate-900">
+              Data subject requests
+            </router-link>
             <router-link to="/exceptions" class="text-slate-600 hover:text-slate-900" active-class="font-semibold text-slate-900">
               Exceptions
             </router-link>

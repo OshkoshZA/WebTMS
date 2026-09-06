@@ -39,6 +39,48 @@ export const FINANCIAL_PERIOD_STATUS = ['Future', 'Open', 'Closed'] as const
 // for an ApiClient, only Create (a new one) — RevokeApiClient has no reverse action.
 export const API_CLIENT_STATUS = ['Active', 'Revoked'] as const
 
+// One-directional, same shape as API_CLIENT_STATUS — no re-enable action exists.
+export const WEBHOOK_SUBSCRIPTION_STATUS = ['Active', 'Disabled'] as const
+
+export const WEBHOOK_DELIVERY_STATUS = ['Pending', 'Delivered', 'Failed'] as const
+
+// Mirrors WebhookEventTypes.All server-side (src/Tms.Modules.Integration) — there is
+// no GET catalog endpoint for this the way Functions has GET /functions, so the list
+// is hardcoded here and must be kept in sync with that file by hand.
+export const WEBHOOK_EVENT_TYPES = [
+  'load.status_changed',
+  'loadconfirmation.issued',
+  'debrief.approved',
+  'invoice.issued',
+  'creditnote.issued',
+  'subcontractor_accrual.raised',
+  'subcontractor_invoice.received',
+  'subcontractor_expense.available_for_export',
+  'financialperiod.closed',
+  'exception.raised',
+] as const
+
+// Of the 10 documented event types, only these actually fire today — every other
+// controller action that could raise one hasn't been wired to WebhookPublisher yet.
+// A UI-only hint (§11.3), not a backend concept, so a registration for a dormant type
+// isn't mistaken for broken.
+export const WEBHOOK_EVENT_TYPES_LIVE = new Set<string>([
+  'invoice.issued',
+  'creditnote.issued',
+  'subcontractor_expense.available_for_export',
+])
+
+export const DATA_CATEGORY = ['FinancialRecords', 'DriverPersonalData', 'PortalContactData', 'AuditTrail'] as const
+
+export const DSR_SUBJECT_TYPE = ['Driver', 'User', 'ClientContact', 'SubcontractorContact'] as const
+
+export const DSR_REQUEST_TYPE = ['Access', 'Rectification', 'Erasure', 'Portability'] as const
+
+// InProgress exists in the wire enum but DataSubjectRequestsController never actually
+// sets it anywhere — every request goes straight from Received to Fulfilled/Rejected —
+// so no UI action here ever targets it, only Received/Fulfilled/Rejected are reachable.
+export const DSR_STATUS = ['Received', 'InProgress', 'Fulfilled', 'Rejected'] as const
+
 export function label(values: readonly string[], value: number): string {
   return values[value] ?? `Unknown (${value})`
 }
@@ -548,6 +590,75 @@ export interface CreateApiClientResponse {
 
 export interface RotateSecretResponse {
   clientSecret: string
+}
+
+export interface WebhookSubscription {
+  id: string
+  eventType: string
+  callbackUrl: string
+  status: number // WEBHOOK_SUBSCRIPTION_STATUS
+}
+
+export interface CreateWebhookSubscriptionRequest {
+  eventType: string
+  callbackUrl: string
+}
+
+// The one and only time a plaintext signing secret is ever returned — Create's own
+// response shape, never part of the plain WebhookSubscription the list/detail views use.
+export interface CreateWebhookSubscriptionResponse {
+  id: string
+  eventType: string
+  callbackUrl: string
+  status: number
+  secret: string
+}
+
+export interface WebhookDelivery {
+  id: string
+  subscriptionId: string
+  eventType: string
+  entityType: string
+  entityId: string
+  occurredAtUtc: string
+  status: number // WEBHOOK_DELIVERY_STATUS
+  attemptedAtUtc: string | null
+  responseStatusCode: number | null
+  errorDetail: string | null
+}
+
+export interface RetentionPolicy {
+  id: string
+  dataCategory: number // DATA_CATEGORY
+  retentionPeriodYears: number
+  legalBasis: string
+  anonymizeAfterExpiry: boolean
+}
+
+export interface RetentionPolicyRequest {
+  dataCategory: number
+  retentionPeriodYears: number
+  legalBasis: string
+  anonymizeAfterExpiry: boolean
+}
+
+export interface DataSubjectRequest {
+  id: string
+  subjectType: number // DSR_SUBJECT_TYPE
+  subjectId: string
+  requestType: number // DSR_REQUEST_TYPE
+  status: number // DSR_STATUS
+  receivedAt: string
+  dueDate: string
+  fulfilledAt: string | null
+  rejectionReason: string | null
+  handledByUserId: string
+}
+
+export interface CreateDataSubjectRequestRequest {
+  subjectType: number
+  subjectId: string
+  requestType: number
 }
 
 export interface ExceptionRecord {
