@@ -44,6 +44,7 @@ export const router = createRouter({
     { path: '/roles', name: 'roles-list', component: () => import('../views/RolesListView.vue') },
     { path: '/roles/new', name: 'roles-new', component: () => import('../views/RoleCreateView.vue') },
     { path: '/roles/:id', name: 'roles-detail', component: () => import('../views/RoleDetailView.vue'), props: true },
+    { path: '/compliance', name: 'compliance', component: () => import('../views/ComplianceView.vue') },
     { path: '/exceptions', name: 'exceptions-list', component: () => import('../views/ExceptionsListView.vue') },
     { path: '/:pathMatch(.*)*', redirect: '/dashboard' },
   ],

@@ -33,6 +33,9 @@ async function logout() {
             <router-link to="/drivers" class="text-slate-600 hover:text-slate-900" active-class="font-semibold text-slate-900">
               Drivers
             </router-link>
+            <router-link to="/compliance" class="text-slate-600 hover:text-slate-900" active-class="font-semibold text-slate-900">
+              Compliance
+            </router-link>
             <router-link to="/subcontractors" class="text-slate-600 hover:text-slate-900" active-class="font-semibold text-slate-900">
               Subcontractors
             </router-link>
