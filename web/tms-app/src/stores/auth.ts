@@ -1,6 +1,6 @@
 import { defineStore } from 'pinia'
 import { api } from '../api/client'
-import { getSession, hasFunction, setSession, type Session } from '../api/session'
+import { getSession, hasAnyFunctionWithPrefix, hasFunction, setSession, type Session } from '../api/session'
 
 interface LoginResponse {
   accessToken: string
@@ -55,5 +55,6 @@ export const useAuthStore = defineStore('auth', {
     // Delegates to the framework-free session module (see its own doc comment) so
     // both this store and api/client.ts's 401-retry logic read one shared source.
     hasFunction,
+    hasAnyFunctionWithPrefix,
   },
 })

@@ -8,11 +8,23 @@ import { exceptionsApi } from '../api/exceptions'
 import { dashboardApi } from '../api/dashboard'
 import { referenceApi } from '../api/reference'
 import { ApiError } from '../api/client'
+import { useAuthStore } from '../stores/auth'
 import {
   EXCEPTION_SEVERITY, LOAD_STATUS,
   type CreditExposureSummary, type Currency, type ExceptionRecord, type Load, type MarginSummary, type PayablesSummary,
 } from '../api/types'
 import { formatMoney } from '../lib/presentation'
+
+const auth = useAuthStore()
+// Role *names* are free text a company chooses for itself (§07), so there's no fixed
+// "Dispatcher"/"Finance Clerk" identifier to key off — this reads the Function codes
+// the session actually holds instead (§16.2's own "same underlying data, different
+// emphasis"): any finance.* function promotes the finance-flavoured tiles (margin,
+// credit exposure, payables) ahead of the dispatch-flavoured ones (exceptions, load
+// status); everyone else — including a plain Dispatcher, who holds no function of
+// their own at all for LoadsController's own design (§5.2) — gets the dispatch
+// tiles first, unchanged from this screen's original order.
+const financeEmphasis = computed(() => auth.hasAnyFunctionWithPrefix('finance.'))
 
 const loads = ref<Load[]>([])
 const openExceptions = ref<ExceptionRecord[]>([])
@@ -79,6 +91,8 @@ onMounted(async () => {
     <p v-else-if="loading" class="mt-6 text-sm text-slate-500">Loading…</p>
 
     <template v-else>
+      <div class="flex flex-col">
+      <div :class="financeEmphasis ? 'order-2' : 'order-1'">
       <section class="mt-6">
         <h2 class="text-sm font-semibold uppercase tracking-wide text-slate-500">Open exceptions</h2>
         <div class="mt-3 grid grid-cols-2 gap-4 sm:grid-cols-4">
@@ -117,7 +131,9 @@ onMounted(async () => {
           </RouterLink>
         </div>
       </section>
+      </div>
 
+      <div :class="financeEmphasis ? 'order-1' : 'order-2'">
       <section v-if="marginSummary" class="mt-8">
         <h2 class="text-sm font-semibold uppercase tracking-wide text-slate-500">Sell/buy margin</h2>
         <div class="mt-3 max-w-md rounded-lg border border-slate-200 bg-white p-4">
@@ -191,6 +207,8 @@ onMounted(async () => {
           </RouterLink>
         </div>
       </section>
+      </div>
+      </div>
     </template>
   </AppLayout>
 </template>

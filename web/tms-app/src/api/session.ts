@@ -46,3 +46,11 @@ export function setSession(session: Session | null): void {
 export function hasFunction(code: string): boolean {
   return current?.functions.includes(code) ?? false
 }
+
+// Role *names* are free text a company chooses for itself (§07) — no fixed
+// "Dispatcher"/"Finance Clerk" identifier exists anywhere in the schema — so
+// role-based dashboard emphasis (§16.2) keys off the Function codes a session
+// actually holds instead, the same authorization model this whole app already uses.
+export function hasAnyFunctionWithPrefix(prefix: string): boolean {
+  return current?.functions.some((f) => f.startsWith(prefix)) ?? false
+}
