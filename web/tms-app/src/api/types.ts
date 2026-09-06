@@ -775,6 +775,39 @@ export interface Debrief {
   expenses: DebriefExpense[]
 }
 
+export interface AcknowledgeConfirmationRequest {
+  acknowledged: boolean
+  reason?: string
+}
+
+export interface SubmitDebriefIncidentRequest {
+  type: number
+  severity: number
+  narrative: string
+}
+
+export interface SubmitDebriefExpenseRequest {
+  expenseTypeId: string
+  description: string
+  amount: number
+  currencyId: string
+  receiptImageUrl?: string
+  claimedAgainst: number
+  accrualId?: string
+}
+
+export interface SubmitDebriefRequest {
+  odometerStart?: number
+  odometerEnd?: number
+  fuelLitres?: number
+  fuelCost?: number
+  drivingHours?: number
+  podReceived: boolean
+  podImageUrl?: string
+  incidents?: SubmitDebriefIncidentRequest[]
+  expenses?: SubmitDebriefExpenseRequest[]
+}
+
 export interface SubcontractorAccrual {
   id: string
   rateLineBuyId: string

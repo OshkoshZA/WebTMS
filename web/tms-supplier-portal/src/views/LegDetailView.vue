@@ -68,7 +68,17 @@ interface ExpenseDraft {
   accrualId: string
 }
 
-const form = ref({
+// Vue 3.4+ casts v-model on a type="number" input to a real number once it holds a
+// value — even with no .number modifier — so these fields are string only while empty.
+const form = ref<{
+  odometerStart: string | number
+  odometerEnd: string | number
+  fuelLitres: string | number
+  fuelCost: string | number
+  drivingHours: string | number
+  podReceived: boolean
+  podImageUrl: string
+}>({
   odometerStart: '',
   odometerEnd: '',
   fuelLitres: '',
@@ -102,7 +112,8 @@ function removeExpense(index: number) {
   expenses.value.splice(index, 1)
 }
 
-function toOptionalNumber(value: string): number | undefined {
+function toOptionalNumber(value: string | number): number | undefined {
+  if (typeof value === 'number') return value
   const trimmed = value.trim()
   return trimmed === '' ? undefined : Number(trimmed)
 }

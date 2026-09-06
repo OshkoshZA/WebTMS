@@ -4,15 +4,22 @@ import AppLayout from '../components/AppLayout.vue'
 import ErrorAlert from '../components/ErrorAlert.vue'
 import StatusBadge from '../components/StatusBadge.vue'
 import { loadsApi } from '../api/loads'
+import { legsApi } from '../api/legs'
+import { accrualsApi } from '../api/accruals'
 import { referenceApi } from '../api/reference'
 import { ApiError } from '../api/client'
 import {
+  CLAIMED_AGAINST, CONFIRMATION_STATUS, DEBRIEF_STATUS, INCIDENT_SEVERITY, INCIDENT_TYPE,
   LOAD_LEG_EXECUTION_TYPE, LOAD_LEG_STATUS, LOAD_STATUS, label,
-  type Client, type ClientCurrency, type Commodity, type CommodityLine, type CostCentre, type Currency, type Driver,
-  type Load, type LoadMargin, type LoadType, type Location, type Subcontractor, type SubcontractorCurrency,
-  type UnitOfMeasure, type Vehicle,
+  type Client, type ClientCurrency, type Commodity, type CommodityLine, type CostCentre, type Currency, type Debrief,
+  type Driver, type ExpenseType, type Load, type LoadConfirmation, type LoadMargin, type LoadType, type Location,
+  type Subcontractor, type SubcontractorAccrual, type SubcontractorCurrency, type SubmitDebriefExpenseRequest,
+  type SubmitDebriefIncidentRequest, type UnitOfMeasure, type Vehicle,
 } from '../api/types'
-import { loadLegStatusTone, loadStatusTone, formatDateTime, formatMoney } from '../lib/presentation'
+import {
+  confirmationStatusTone, debriefStatusTone, formatDateTime, formatMoney, incidentSeverityTone,
+  loadLegStatusTone, loadStatusTone,
+} from '../lib/presentation'
 
 const props = defineProps<{ id: string }>()
 
@@ -28,6 +35,7 @@ const currencies = ref<Currency[]>([])
 const commodities = ref<Commodity[]>([])
 const unitsOfMeasure = ref<UnitOfMeasure[]>([])
 const clientCurrencies = ref<ClientCurrency[]>([])
+const expenseTypes = ref<ExpenseType[]>([])
 const margin = ref<LoadMargin | null>(null)
 
 const loading = ref(true)
@@ -76,7 +84,7 @@ async function loadEverything() {
   try {
     const [
       loadData, clientList, loadTypeList, locationList, costCentreList, vehicleList, driverList, subcontractorList,
-      currencyList, commodityList, unitOfMeasureList, marginData,
+      currencyList, commodityList, unitOfMeasureList, expenseTypeList, marginData,
     ] = await Promise.all([
       loadsApi.get(props.id),
       referenceApi.clients(),
@@ -89,6 +97,7 @@ async function loadEverything() {
       referenceApi.currencies(),
       referenceApi.commodities(),
       referenceApi.unitsOfMeasure(),
+      referenceApi.expenseTypes(),
       loadsApi.margin(props.id),
     ])
     load.value = loadData
@@ -102,6 +111,7 @@ async function loadEverything() {
     currencies.value = currencyList
     commodities.value = commodityList
     unitsOfMeasure.value = unitOfMeasureList
+    expenseTypes.value = expenseTypeList
     margin.value = marginData
     clientCurrencies.value = await referenceApi.clientCurrencies(loadData.clientId)
   } catch (e) {
@@ -303,6 +313,169 @@ async function submitCommodityLine(legExecutionType: number) {
     commodityActionBusy.value = false
   }
 }
+
+// --- Per-leg "carrier actions" panel (one open at a time) ---
+// LegsController's own confirmation/debrief routes are also reachable by an internal
+// user standing in for a subcontractor who called or emailed instead of using the
+// Supplier Portal (LegsController.cs's own doc comments on those two actions) — no
+// other tms-app screen offers this, so it lives here alongside the leg it's for.
+const carrierLegId = ref<string | null>(null)
+const confirmation = ref<LoadConfirmation | null>(null)
+const confirmationLoading = ref(false)
+const confirmationError = ref('')
+const confirmationBusy = ref(false)
+const declineReason = ref('')
+const showDeclineForm = ref(false)
+
+const debrief = ref<Debrief | null>(null)
+const debriefError = ref('')
+const debriefSubmitting = ref(false)
+const carrierAccruals = ref<SubcontractorAccrual[]>([])
+
+interface IncidentDraft { type: number; severity: number; narrative: string }
+interface ExpenseDraft {
+  expenseTypeId: string; description: string; amount: string; currencyId: string
+  receiptImageUrl: string; claimedAgainst: number; accrualId: string
+}
+
+// Vue 3.4+ casts v-model on a type="number" input to a real number once it holds a
+// value — even with no .number modifier — so these fields are string only while empty.
+const debriefForm = ref<{
+  odometerStart: string | number; odometerEnd: string | number; fuelLitres: string | number
+  fuelCost: string | number; drivingHours: string | number; podReceived: boolean; podImageUrl: string
+}>({
+  odometerStart: '', odometerEnd: '', fuelLitres: '', fuelCost: '', drivingHours: '',
+  podReceived: false, podImageUrl: '',
+})
+const debriefIncidents = ref<IncidentDraft[]>([])
+const debriefExpenses = ref<ExpenseDraft[]>([])
+
+function addDebriefIncident() {
+  debriefIncidents.value.push({ type: 0, severity: 0, narrative: '' })
+}
+function removeDebriefIncident(index: number) {
+  debriefIncidents.value.splice(index, 1)
+}
+function addDebriefExpense() {
+  debriefExpenses.value.push({
+    expenseTypeId: '', description: '', amount: '', currencyId: '', receiptImageUrl: '', claimedAgainst: 0, accrualId: '',
+  })
+}
+function removeDebriefExpense(index: number) {
+  debriefExpenses.value.splice(index, 1)
+}
+function toOptionalNumber(value: string | number): number | undefined {
+  if (typeof value === 'number') return value
+  const trimmed = value.trim()
+  return trimmed === '' ? undefined : Number(trimmed)
+}
+
+async function toggleCarrierPanel(leg: { id: string; executionType: number; subcontractorId: string | null }) {
+  if (carrierLegId.value === leg.id) {
+    carrierLegId.value = null
+    return
+  }
+  carrierLegId.value = leg.id
+  confirmation.value = null
+  confirmationError.value = ''
+  showDeclineForm.value = false
+  declineReason.value = ''
+  debrief.value = null
+  debriefError.value = ''
+  carrierAccruals.value = []
+  debriefForm.value = { odometerStart: '', odometerEnd: '', fuelLitres: '', fuelCost: '', drivingHours: '', podReceived: false, podImageUrl: '' }
+  debriefIncidents.value = []
+  debriefExpenses.value = []
+
+  confirmationLoading.value = true
+  try {
+    const tasks: Promise<void>[] = []
+    if (leg.executionType === 1) {
+      tasks.push(
+        legsApi.getConfirmation(leg.id).then((c) => { confirmation.value = c }).catch((e) => {
+          if (!(e instanceof ApiError && e.status === 404)) throw e
+        }),
+      )
+      if (leg.subcontractorId) {
+        tasks.push(accrualsApi.list(leg.subcontractorId, 0).then((a) => { carrierAccruals.value = a }))
+      }
+    }
+    tasks.push(
+      legsApi.getDebrief(leg.id).then((d) => { debrief.value = d }).catch((e) => {
+        if (!(e instanceof ApiError && e.status === 404)) throw e
+      }),
+    )
+    await Promise.all(tasks)
+  } catch (e) {
+    confirmationError.value = e instanceof ApiError ? e.message : 'Could not load this leg\'s carrier actions.'
+  } finally {
+    confirmationLoading.value = false
+  }
+}
+
+async function acknowledgeConfirmation() {
+  if (!carrierLegId.value) return
+  confirmationBusy.value = true
+  confirmationError.value = ''
+  try {
+    await legsApi.acknowledgeConfirmation(carrierLegId.value, { acknowledged: true })
+    confirmation.value = await legsApi.getConfirmation(carrierLegId.value)
+  } catch (e) {
+    confirmationError.value = e instanceof ApiError ? e.message : 'Could not accept this confirmation.'
+  } finally {
+    confirmationBusy.value = false
+  }
+}
+async function declineConfirmation() {
+  if (!carrierLegId.value) return
+  confirmationBusy.value = true
+  confirmationError.value = ''
+  try {
+    await legsApi.acknowledgeConfirmation(carrierLegId.value, { acknowledged: false, reason: declineReason.value || undefined })
+    confirmation.value = await legsApi.getConfirmation(carrierLegId.value)
+    showDeclineForm.value = false
+  } catch (e) {
+    confirmationError.value = e instanceof ApiError ? e.message : 'Could not decline this confirmation.'
+  } finally {
+    confirmationBusy.value = false
+  }
+}
+
+async function submitCarrierDebrief() {
+  if (!carrierLegId.value) return
+  debriefError.value = ''
+  debriefSubmitting.value = true
+  try {
+    const incidentRequests: SubmitDebriefIncidentRequest[] = debriefIncidents.value.map((i) => ({
+      type: i.type, severity: i.severity, narrative: i.narrative,
+    }))
+    const expenseRequests: SubmitDebriefExpenseRequest[] = debriefExpenses.value.map((e) => ({
+      expenseTypeId: e.expenseTypeId,
+      description: e.description,
+      amount: Number(e.amount),
+      currencyId: e.currencyId,
+      receiptImageUrl: e.receiptImageUrl || undefined,
+      claimedAgainst: e.claimedAgainst,
+      accrualId: e.claimedAgainst === 1 ? e.accrualId || undefined : undefined,
+    }))
+
+    debrief.value = await legsApi.submitDebrief(carrierLegId.value, {
+      odometerStart: toOptionalNumber(debriefForm.value.odometerStart),
+      odometerEnd: toOptionalNumber(debriefForm.value.odometerEnd),
+      fuelLitres: toOptionalNumber(debriefForm.value.fuelLitres),
+      fuelCost: toOptionalNumber(debriefForm.value.fuelCost),
+      drivingHours: toOptionalNumber(debriefForm.value.drivingHours),
+      podReceived: debriefForm.value.podReceived,
+      podImageUrl: debriefForm.value.podImageUrl || undefined,
+      incidents: incidentRequests.length ? incidentRequests : undefined,
+      expenses: expenseRequests.length ? expenseRequests : undefined,
+    })
+  } catch (e) {
+    debriefError.value = e instanceof ApiError ? e.message : 'Could not submit this debrief.'
+  } finally {
+    debriefSubmitting.value = false
+  }
+}
 </script>
 
 <template>
@@ -497,6 +670,13 @@ async function submitCommodityLine(legExecutionType: number) {
                     >
                       {{ commodityLegId === leg.id ? 'Hide commodities' : 'Commodities' }}
                     </button>
+                    <button
+                      type="button"
+                      class="rounded-md border border-slate-300 px-2.5 py-1 text-xs font-medium text-slate-700 hover:bg-slate-100"
+                      @click="toggleCarrierPanel(leg)"
+                    >
+                      {{ carrierLegId === leg.id ? 'Hide carrier actions' : 'On behalf of carrier' }}
+                    </button>
                   </div>
                 </td>
               </tr>
@@ -647,6 +827,227 @@ async function submitCommodityLine(legExecutionType: number) {
                         {{ commodityActionBusy ? 'Adding…' : commodityCreditBreach ? 'Retry with override' : 'Add line' }}
                       </button>
                     </form>
+                  </template>
+                </td>
+              </tr>
+              <tr v-if="carrierLegId === leg.id" class="border-b border-slate-100 bg-slate-50 last:border-0">
+                <td colspan="8" class="px-4 py-3">
+                  <ErrorAlert v-if="confirmationError" :message="confirmationError" class="mb-3" />
+                  <p v-if="confirmationLoading" class="text-sm text-slate-500">Loading…</p>
+                  <template v-else>
+                    <section>
+                      <h3 class="text-sm font-semibold text-slate-900">Load confirmation</h3>
+                      <p v-if="leg.executionType !== 1" class="mt-2 text-sm text-slate-500">
+                        No confirmation applies — this leg isn't Subcontracted.
+                      </p>
+                      <p v-else-if="!confirmation" class="mt-2 text-sm text-slate-500">
+                        No load confirmation has been issued for this leg yet.
+                      </p>
+                      <div v-else class="mt-2 rounded-md border border-slate-200 bg-white p-3">
+                        <div class="flex items-center justify-between">
+                          <div>
+                            <p class="text-sm text-slate-900">{{ confirmation.documentNumber }}</p>
+                            <p class="text-sm text-slate-500">Issued {{ formatDateTime(confirmation.issuedDate) }}</p>
+                          </div>
+                          <StatusBadge :text="label(CONFIRMATION_STATUS, confirmation.status)" :tone="confirmationStatusTone(confirmation.status)" />
+                        </div>
+                        <p v-if="confirmation.declineReason" class="mt-2 text-sm text-rose-700">
+                          Decline reason: {{ confirmation.declineReason }}
+                        </p>
+
+                        <div v-if="confirmation.status === 0" class="mt-3">
+                          <div v-if="!showDeclineForm" class="flex gap-2">
+                            <button
+                              type="button" :disabled="confirmationBusy"
+                              class="rounded-md bg-slate-900 px-3 py-1.5 text-sm font-medium text-white hover:bg-slate-700 disabled:opacity-50"
+                              @click="acknowledgeConfirmation"
+                            >
+                              Accept
+                            </button>
+                            <button
+                              type="button" :disabled="confirmationBusy"
+                              class="rounded-md border border-slate-300 px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-100 disabled:opacity-50"
+                              @click="showDeclineForm = true"
+                            >
+                              Decline
+                            </button>
+                          </div>
+                          <div v-else class="flex flex-col gap-2">
+                            <textarea
+                              v-model="declineReason" rows="2" placeholder="Reason for declining (optional)"
+                              class="rounded-md border border-slate-300 px-3 py-2 text-sm focus:border-slate-500 focus:outline-none"
+                            />
+                            <div class="flex gap-2">
+                              <button
+                                type="button" :disabled="confirmationBusy"
+                                class="rounded-md bg-rose-700 px-3 py-1.5 text-sm font-medium text-white hover:bg-rose-800 disabled:opacity-50"
+                                @click="declineConfirmation"
+                              >
+                                Confirm decline
+                              </button>
+                              <button
+                                type="button" class="rounded-md border border-slate-300 px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-100"
+                                @click="showDeclineForm = false"
+                              >
+                                Cancel
+                              </button>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    </section>
+
+                    <section class="mt-6">
+                      <h3 class="text-sm font-semibold text-slate-900">Debrief</h3>
+
+                      <div v-if="debrief" class="mt-2 rounded-md border border-slate-200 bg-white p-3">
+                        <div class="flex items-center justify-between">
+                          <p class="text-sm text-slate-500">Submitted {{ formatDateTime(debrief.submittedAt) }}</p>
+                          <StatusBadge :text="label(DEBRIEF_STATUS, debrief.status)" :tone="debriefStatusTone(debrief.status)" />
+                        </div>
+                        <p v-if="debrief.exceptionReasons" class="mt-2 text-sm text-amber-700">{{ debrief.exceptionReasons }}</p>
+
+                        <dl class="mt-3 grid grid-cols-2 gap-3 text-sm sm:grid-cols-4">
+                          <div><dt class="text-slate-500">Odometer</dt><dd class="text-slate-900">{{ debrief.odometerStart ?? '—' }} → {{ debrief.odometerEnd ?? '—' }}</dd></div>
+                          <div><dt class="text-slate-500">Fuel</dt><dd class="text-slate-900">{{ debrief.fuelLitres ?? '—' }} L / {{ debrief.fuelCost ?? '—' }}</dd></div>
+                          <div><dt class="text-slate-500">Driving hours</dt><dd class="text-slate-900">{{ debrief.drivingHours ?? '—' }}</dd></div>
+                          <div><dt class="text-slate-500">POD received</dt><dd class="text-slate-900">{{ debrief.podReceived ? 'Yes' : 'No' }}</dd></div>
+                        </dl>
+
+                        <template v-if="debrief.incidents.length">
+                          <h4 class="mt-4 text-xs font-semibold uppercase tracking-wide text-slate-500">Incidents</h4>
+                          <ul class="mt-2 flex flex-col gap-2">
+                            <li v-for="incident in debrief.incidents" :key="incident.id" class="rounded-md border border-slate-200 p-2 text-sm">
+                              <span class="font-medium text-slate-900">{{ label(INCIDENT_TYPE, incident.type) }}</span>
+                              <StatusBadge class="ml-2" :text="label(INCIDENT_SEVERITY, incident.severity)" :tone="incidentSeverityTone(incident.severity)" />
+                              <p class="mt-1 text-slate-600">{{ incident.narrative }}</p>
+                            </li>
+                          </ul>
+                        </template>
+
+                        <template v-if="debrief.expenses.length">
+                          <h4 class="mt-4 text-xs font-semibold uppercase tracking-wide text-slate-500">Expenses</h4>
+                          <ul class="mt-2 flex flex-col gap-2">
+                            <li v-for="expense in debrief.expenses" :key="expense.id" class="flex items-center justify-between rounded-md border border-slate-200 p-2 text-sm">
+                              <div>
+                                <span class="font-medium text-slate-900">{{ expense.description }}</span>
+                                <p class="text-slate-500">Claimed against: {{ label(CLAIMED_AGAINST, expense.claimedAgainst) }}</p>
+                              </div>
+                              <span class="text-slate-900">{{ formatMoney(expense.amount, currencyCode(expense.currencyId)) }}</span>
+                            </li>
+                          </ul>
+                        </template>
+                      </div>
+
+                      <p v-else-if="leg.status !== 3" class="mt-2 text-sm text-slate-500">
+                        A debrief can be submitted once this leg is Delivered.
+                      </p>
+
+                      <form v-else class="mt-2 flex flex-col gap-4 rounded-md border border-slate-200 bg-white p-3" @submit.prevent="submitCarrierDebrief">
+                        <ErrorAlert v-if="debriefError" :message="debriefError" />
+
+                        <div class="grid grid-cols-2 gap-3 sm:grid-cols-3">
+                          <label class="flex flex-col gap-1 text-sm text-slate-700">
+                            Odometer start
+                            <input v-model="debriefForm.odometerStart" type="number" step="any" class="rounded-md border border-slate-300 px-2 py-1.5 text-sm" />
+                          </label>
+                          <label class="flex flex-col gap-1 text-sm text-slate-700">
+                            Odometer end
+                            <input v-model="debriefForm.odometerEnd" type="number" step="any" class="rounded-md border border-slate-300 px-2 py-1.5 text-sm" />
+                          </label>
+                          <label class="flex flex-col gap-1 text-sm text-slate-700">
+                            Driving hours
+                            <input v-model="debriefForm.drivingHours" type="number" step="any" class="rounded-md border border-slate-300 px-2 py-1.5 text-sm" />
+                          </label>
+                          <label class="flex flex-col gap-1 text-sm text-slate-700">
+                            Fuel (litres)
+                            <input v-model="debriefForm.fuelLitres" type="number" step="any" class="rounded-md border border-slate-300 px-2 py-1.5 text-sm" />
+                          </label>
+                          <label class="flex flex-col gap-1 text-sm text-slate-700">
+                            Fuel cost
+                            <input v-model="debriefForm.fuelCost" type="number" step="any" class="rounded-md border border-slate-300 px-2 py-1.5 text-sm" />
+                          </label>
+                        </div>
+
+                        <div class="flex flex-col gap-2">
+                          <label class="flex items-center gap-2 text-sm text-slate-700">
+                            <input v-model="debriefForm.podReceived" type="checkbox" class="rounded border-slate-300" />
+                            POD received
+                          </label>
+                          <label class="flex flex-col gap-1 text-sm text-slate-700">
+                            POD image URL
+                            <input v-model="debriefForm.podImageUrl" type="url" class="rounded-md border border-slate-300 px-2 py-1.5 text-sm" />
+                          </label>
+                        </div>
+
+                        <div>
+                          <div class="flex items-center justify-between">
+                            <h4 class="text-xs font-semibold uppercase tracking-wide text-slate-500">Incidents</h4>
+                            <button type="button" class="text-sm text-slate-600 hover:text-slate-900" @click="addDebriefIncident">+ Add incident</button>
+                          </div>
+                          <div v-for="(incident, i) in debriefIncidents" :key="i" class="mt-2 grid grid-cols-1 gap-2 rounded-md border border-slate-200 p-2 sm:grid-cols-4">
+                            <select v-model.number="incident.type" class="rounded-md border border-slate-300 px-2 py-1.5 text-sm">
+                              <option v-for="(t, idx) in INCIDENT_TYPE" :key="idx" :value="idx">{{ t }}</option>
+                            </select>
+                            <select v-model.number="incident.severity" class="rounded-md border border-slate-300 px-2 py-1.5 text-sm">
+                              <option v-for="(s, idx) in INCIDENT_SEVERITY" :key="idx" :value="idx">{{ s }}</option>
+                            </select>
+                            <input v-model="incident.narrative" placeholder="Narrative" class="col-span-2 rounded-md border border-slate-300 px-2 py-1.5 text-sm sm:col-span-1" />
+                            <button type="button" class="text-sm text-rose-700 hover:text-rose-900" @click="removeDebriefIncident(i)">Remove</button>
+                          </div>
+                        </div>
+
+                        <div>
+                          <div class="flex items-center justify-between">
+                            <h4 class="text-xs font-semibold uppercase tracking-wide text-slate-500">Expenses</h4>
+                            <button type="button" class="text-sm text-slate-600 hover:text-slate-900" @click="addDebriefExpense">+ Add expense</button>
+                          </div>
+                          <div v-for="(expense, i) in debriefExpenses" :key="i" class="mt-2 flex flex-col gap-2 rounded-md border border-slate-200 p-2">
+                            <div class="grid grid-cols-2 gap-2 sm:grid-cols-4">
+                              <select v-model="expense.expenseTypeId" class="rounded-md border border-slate-300 px-2 py-1.5 text-sm">
+                                <option value="" disabled>Expense type…</option>
+                                <option v-for="type in expenseTypes" :key="type.id" :value="type.id">{{ type.code }} — {{ type.name }}</option>
+                              </select>
+                              <input v-model="expense.description" placeholder="Description" class="rounded-md border border-slate-300 px-2 py-1.5 text-sm" />
+                              <input v-model="expense.amount" type="number" step="any" placeholder="Amount" class="rounded-md border border-slate-300 px-2 py-1.5 text-sm" />
+                              <select v-model="expense.currencyId" class="rounded-md border border-slate-300 px-2 py-1.5 text-sm">
+                                <option value="" disabled>Currency…</option>
+                                <option v-for="c in currencies" :key="c.id" :value="c.id">{{ c.code }}</option>
+                              </select>
+                            </div>
+                            <input v-model="expense.receiptImageUrl" placeholder="Receipt image URL (optional)" class="rounded-md border border-slate-300 px-2 py-1.5 text-sm" />
+                            <div class="flex flex-wrap items-center gap-4">
+                              <label class="flex items-center gap-1.5 text-sm text-slate-700">
+                                <input v-model.number="expense.claimedAgainst" type="radio" :value="0" :name="`carrier-claimed-against-${leg.id}-${i}`" />
+                                Company
+                              </label>
+                              <label v-if="leg.executionType === 1" class="flex items-center gap-1.5 text-sm text-slate-700">
+                                <input v-model.number="expense.claimedAgainst" type="radio" :value="1" :name="`carrier-claimed-against-${leg.id}-${i}`" />
+                                Subcontractor accrual
+                              </label>
+                              <select
+                                v-if="expense.claimedAgainst === 1"
+                                v-model="expense.accrualId"
+                                class="rounded-md border border-slate-300 px-2 py-1.5 text-sm"
+                              >
+                                <option value="" disabled>Accrual…</option>
+                                <option v-for="a in carrierAccruals" :key="a.id" :value="a.id">
+                                  {{ formatMoney(a.estimatedAmount, currencyCode(a.currencyId)) }} — {{ a.accrualDate }}
+                                </option>
+                              </select>
+                              <button type="button" class="ml-auto text-sm text-rose-700 hover:text-rose-900" @click="removeDebriefExpense(i)">Remove</button>
+                            </div>
+                          </div>
+                        </div>
+
+                        <button
+                          type="submit" :disabled="debriefSubmitting"
+                          class="self-start rounded-md bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-700 disabled:opacity-50"
+                        >
+                          {{ debriefSubmitting ? 'Submitting…' : 'Submit debrief' }}
+                        </button>
+                      </form>
+                    </section>
                   </template>
                 </td>
               </tr>
