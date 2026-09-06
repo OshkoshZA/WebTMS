@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { onMounted, ref } from 'vue'
+import { useRoute } from 'vue-router'
 import AppLayout from '../components/AppLayout.vue'
 import ErrorAlert from '../components/ErrorAlert.vue'
 import StatusBadge from '../components/StatusBadge.vue'
@@ -10,13 +11,15 @@ import { ApiError } from '../api/client'
 import { SUBCONTRACTOR_ACCRUAL_STATUS, label, type Currency, type Subcontractor, type SubcontractorAccrual } from '../api/types'
 import { accrualStatusTone, formatDate, formatMoney } from '../lib/presentation'
 
+const route = useRoute()
 const accruals = ref<SubcontractorAccrual[]>([])
 const subcontractors = ref<Subcontractor[]>([])
 const currencies = ref<Currency[]>([])
 const subcontractorFilter = ref('')
 // The AP clerk's own working set is "still outstanding" — default to Accrued rather
-// than showing every Netted accrual too (§10.2).
-const statusFilter = ref<number | ''>(0)
+// than showing every Netted accrual too (§10.2) — but honor an explicit ?status=
+// from a drill-through link (the dashboard's own Accrued tile, §16.2) over that default.
+const statusFilter = ref<number | ''>(typeof route.query.status === 'string' ? Number(route.query.status) : 0)
 
 const loading = ref(true)
 const error = ref('')

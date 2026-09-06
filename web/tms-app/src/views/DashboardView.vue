@@ -5,18 +5,30 @@ import AppLayout from '../components/AppLayout.vue'
 import ErrorAlert from '../components/ErrorAlert.vue'
 import { loadsApi } from '../api/loads'
 import { exceptionsApi } from '../api/exceptions'
+import { dashboardApi } from '../api/dashboard'
+import { referenceApi } from '../api/reference'
 import { ApiError } from '../api/client'
-import { EXCEPTION_SEVERITY, LOAD_STATUS, type ExceptionRecord, type Load } from '../api/types'
+import {
+  EXCEPTION_SEVERITY, LOAD_STATUS,
+  type CreditExposureSummary, type Currency, type ExceptionRecord, type Load, type MarginSummary, type PayablesSummary,
+} from '../api/types'
+import { formatMoney } from '../lib/presentation'
 
 const loads = ref<Load[]>([])
 const openExceptions = ref<ExceptionRecord[]>([])
+const currencies = ref<Currency[]>([])
+const marginSummary = ref<MarginSummary | null>(null)
+const creditExposureSummary = ref<CreditExposureSummary | null>(null)
+const payablesSummary = ref<PayablesSummary | null>(null)
 const loading = ref(true)
 const error = ref('')
 
-// Two tiles, deliberately — every other §16.2 tile (sell/buy margin, aged debtors,
-// credit exposure across clients, subcontractor payables summary, on-time delivery
-// rate) needs either a new backend aggregate that doesn't exist yet or data this
-// schema doesn't track at all (see docs/architecture.html §16.2's own note).
+// Two tiles were originally built here — every other §16.2 tile (sell/buy margin,
+// aged debtors, credit exposure across clients, subcontractor payables summary,
+// on-time delivery rate) needed either a new backend aggregate that didn't exist yet
+// or data this schema doesn't track at all. Three of those five are now built
+// (DashboardController) — aged debtors and on-time delivery rate remain a known,
+// bounded gap for the reasons docs/architecture.html §16.2 still documents.
 const loadCountsByStatus = computed(() => {
   const counts = new Array(LOAD_STATUS.length).fill(0)
   for (const load of loads.value) counts[load.status]++
@@ -31,11 +43,26 @@ const exceptionCountsBySeverity = computed(() => {
 
 const totalOpenExceptions = computed(() => openExceptions.value.length)
 
+function currencyCode(currencyId: string): string {
+  return currencies.value.find((c) => c.id === currencyId)?.code ?? currencyId
+}
+
 onMounted(async () => {
   try {
-    const [loadList, exceptionList] = await Promise.all([loadsApi.list(), exceptionsApi.list(0)])
+    const [loadList, exceptionList, currencyList, margin, exposure, payables] = await Promise.all([
+      loadsApi.list(),
+      exceptionsApi.list(0),
+      referenceApi.currencies(),
+      dashboardApi.marginSummary(),
+      dashboardApi.creditExposureSummary(),
+      dashboardApi.payablesSummary(),
+    ])
     loads.value = loadList
     openExceptions.value = exceptionList
+    currencies.value = currencyList
+    marginSummary.value = margin
+    creditExposureSummary.value = exposure
+    payablesSummary.value = payables
   } catch (e) {
     error.value = e instanceof ApiError ? e.message : 'Could not load the dashboard.'
   } finally {
@@ -87,6 +114,80 @@ onMounted(async () => {
           >
             <p class="text-2xl font-semibold text-slate-900">{{ loadCountsByStatus[i] }}</p>
             <p class="mt-1 text-sm text-slate-500">{{ status }}</p>
+          </RouterLink>
+        </div>
+      </section>
+
+      <section v-if="marginSummary" class="mt-8">
+        <h2 class="text-sm font-semibold uppercase tracking-wide text-slate-500">Sell/buy margin</h2>
+        <div class="mt-3 max-w-md rounded-lg border border-slate-200 bg-white p-4">
+          <p
+            class="text-2xl font-semibold"
+            :class="marginSummary.margin < 0 ? 'text-rose-700' : 'text-slate-900'"
+          >
+            {{ formatMoney(marginSummary.margin, currencyCode(marginSummary.reportingCurrencyId)) }}
+          </p>
+          <p class="mt-1 text-sm text-slate-500">
+            Sell {{ formatMoney(marginSummary.sellTotal, currencyCode(marginSummary.reportingCurrencyId)) }}
+            · Buy {{ formatMoney(marginSummary.buyTotal, currencyCode(marginSummary.reportingCurrencyId)) }}
+          </p>
+          <p v-if="marginSummary.unconverted.length" class="mt-2 text-xs text-amber-700">
+            Excludes {{ marginSummary.unconverted.length }} currency amount(s) with no captured exchange rate to
+            {{ currencyCode(marginSummary.reportingCurrencyId) }}.
+          </p>
+        </div>
+      </section>
+
+      <section v-if="creditExposureSummary && creditExposureSummary.byCurrency.length" class="mt-8">
+        <h2 class="text-sm font-semibold uppercase tracking-wide text-slate-500">Credit exposure across clients</h2>
+        <RouterLink
+          to="/clients"
+          class="mt-3 grid max-w-2xl grid-cols-1 gap-4 rounded-lg border border-slate-200 bg-white p-4 hover:border-slate-300 hover:shadow-sm sm:grid-cols-2"
+        >
+          <div v-for="row in creditExposureSummary.byCurrency" :key="row.currencyId">
+            <p class="text-2xl font-semibold text-slate-900">
+              {{ formatMoney(row.totalExposure, currencyCode(row.currencyId)) }}
+              <span class="text-base font-normal text-slate-400">/ {{ formatMoney(row.totalCreditLimit, currencyCode(row.currencyId)) }}</span>
+            </p>
+            <p class="mt-1 text-sm text-slate-500">
+              Total exposure vs. credit limit ({{ currencyCode(row.currencyId) }}) — AR
+              {{ formatMoney(row.totalArOutstanding, currencyCode(row.currencyId)) }}, WIP
+              {{ formatMoney(row.totalWip, currencyCode(row.currencyId)) }}
+            </p>
+          </div>
+        </RouterLink>
+      </section>
+
+      <section v-if="payablesSummary" class="mt-8">
+        <h2 class="text-sm font-semibold uppercase tracking-wide text-slate-500">Subcontractor payables</h2>
+        <div class="mt-3 grid grid-cols-2 gap-4 sm:grid-cols-4">
+          <RouterLink
+            to="/accruals?status=0"
+            class="rounded-lg border border-slate-200 bg-white p-4 hover:border-slate-300 hover:shadow-sm"
+          >
+            <p class="text-2xl font-semibold text-slate-900">{{ payablesSummary.accrued }}</p>
+            <p class="mt-1 text-sm text-slate-500">Accrued</p>
+          </RouterLink>
+          <RouterLink
+            to="/supplier-invoices"
+            class="rounded-lg border border-slate-200 bg-white p-4 hover:border-slate-300 hover:shadow-sm"
+          >
+            <p class="text-2xl font-semibold text-slate-900">{{ payablesSummary.availableToExport }}</p>
+            <p class="mt-1 text-sm text-slate-500">Available to export</p>
+          </RouterLink>
+          <RouterLink
+            to="/supplier-invoices"
+            class="rounded-lg border border-slate-200 bg-white p-4 hover:border-slate-300 hover:shadow-sm"
+          >
+            <p class="text-2xl font-semibold text-slate-900">{{ payablesSummary.exported }}</p>
+            <p class="mt-1 text-sm text-slate-500">Exported</p>
+          </RouterLink>
+          <RouterLink
+            to="/supplier-invoices"
+            class="rounded-lg border border-slate-200 bg-white p-4 hover:border-slate-300 hover:shadow-sm"
+          >
+            <p class="text-2xl font-semibold text-slate-900">{{ payablesSummary.paid }}</p>
+            <p class="mt-1 text-sm text-slate-500">Paid</p>
           </RouterLink>
         </div>
       </section>

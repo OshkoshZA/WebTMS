@@ -808,6 +808,39 @@ export interface SubmitDebriefRequest {
   expenses?: SubmitDebriefExpenseRequest[]
 }
 
+export interface UnconvertedMarginAmount {
+  currencyId: string
+  side: string // 'Sell' | 'Buy'
+  amount: number
+}
+
+export interface MarginSummary {
+  reportingCurrencyId: string
+  sellTotal: number
+  buyTotal: number
+  margin: number
+  unconverted: UnconvertedMarginAmount[]
+}
+
+export interface CurrencyExposureTotal {
+  currencyId: string
+  totalCreditLimit: number
+  totalArOutstanding: number
+  totalWip: number
+  totalExposure: number
+}
+
+export interface CreditExposureSummary {
+  byCurrency: CurrencyExposureTotal[]
+}
+
+export interface PayablesSummary {
+  accrued: number
+  availableToExport: number
+  exported: number
+  paid: number
+}
+
 export interface SubcontractorAccrual {
   id: string
   rateLineBuyId: string
