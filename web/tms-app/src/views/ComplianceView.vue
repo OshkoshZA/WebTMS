@@ -1,11 +1,12 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
-import { useRouter } from 'vue-router'
+import { RouterLink, useRouter } from 'vue-router'
 import AppLayout from '../components/AppLayout.vue'
 import ErrorAlert from '../components/ErrorAlert.vue'
 import StatusBadge from '../components/StatusBadge.vue'
 import { vehiclesApi } from '../api/vehicles'
 import { driversApi } from '../api/drivers'
+import { complianceApi } from '../api/compliance'
 import { ApiError } from '../api/client'
 import type { Driver, Vehicle } from '../api/types'
 import { formatDate } from '../lib/presentation'
@@ -17,6 +18,11 @@ const vehicles = ref<Vehicle[]>([])
 const drivers = ref<Driver[]>([])
 const loading = ref(true)
 const error = ref('')
+// Best-effort, not on the critical path: this screen's own tiles are computed
+// entirely client-side either way (see daysAhead below), so a caller lacking
+// exception.manage, or any transient failure, still gets the full screen — the sync
+// to §16.1's shared Exception mechanism just silently doesn't happen this visit.
+const exceptionsSynced = ref(false)
 
 // How far ahead "expiring soon" looks — purely a display threshold, recomputed
 // client-side; there's no backend endpoint to filter by, so both full lists are
@@ -116,6 +122,15 @@ function itemStatusText(daysUntil: number): string {
 }
 
 onMounted(async () => {
+  // No background job exists anywhere in this codebase to run this on a schedule
+  // (§4.3/§11.3's own documented gap) — so it runs on demand instead, once per visit
+  // to this screen, alongside (not blocking) the reads below.
+  complianceApi.reconcileExceptions().then(() => {
+    exceptionsSynced.value = true
+  }).catch(() => {
+    // Silently ignored — see exceptionsSynced's own comment above.
+  })
+
   try {
     const [vehicleList, driverList] = await Promise.all([vehiclesApi.list(), driversApi.list()])
     vehicles.value = vehicleList
@@ -133,6 +148,9 @@ onMounted(async () => {
     <h1 class="text-xl font-semibold text-slate-900">Compliance</h1>
     <p class="mt-1 text-sm text-slate-500">
       Vehicle licence/vehicle-test and driver licence/PDP expiry, computed from the fleet and driver masters — no separate tracking of its own.
+    </p>
+    <p v-if="exceptionsSynced" class="mt-1 text-xs text-slate-400">
+      Synced to <RouterLink to="/exceptions" class="underline hover:text-slate-600">Exceptions</RouterLink> just now.
     </p>
 
     <ErrorAlert v-if="error" :message="error" class="mt-4" />

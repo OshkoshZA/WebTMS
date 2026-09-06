@@ -97,5 +97,17 @@ public class MasterDataAndAdminBoundaryTests
             (await _fixture.StaffClient.GetAsync($"/api/v1/financial-periods/{anyPeriod.Id}/debtors-aging")).StatusCode);
     }
 
+    [Fact]
+    public async Task ComplianceReconcile_rejects_both_portal_types()
+    {
+        using var subClient = _fixture.CreateAuthenticatedClient(_fixture.SubcontractorToken);
+        Assert.Equal(HttpStatusCode.Forbidden,
+            (await subClient.PostAsync("/api/v1/compliance/reconcile-exceptions", null)).StatusCode);
+
+        using var clientClient = _fixture.CreateAuthenticatedClient(_fixture.ClientToken);
+        Assert.Equal(HttpStatusCode.Forbidden,
+            (await clientClient.PostAsync("/api/v1/compliance/reconcile-exceptions", null)).StatusCode);
+    }
+
     private sealed record PeriodLike(Guid Id);
 }
