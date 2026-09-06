@@ -27,8 +27,9 @@ public enum UserStatus
 /// Refresh check this directly rather than relying on lockout, which SignInManager
 /// enforces but the UserManager.CheckPasswordAsync call this app uses does not. The
 /// doc's own three-state Invited|Active|Disabled for a portal contact collapses to
-/// this same two-state enum — there's no email-invite infrastructure anywhere in this
-/// codebase yet to make "Invited" mean anything distinct from "Active".
+/// this same two-state enum — real email sending exists now (Tms.Api.Services.
+/// IEmailSender, §8.2), but nothing yet generates an invite token or accepts one, so
+/// there's still no way to make "Invited" mean anything distinct from "Active".
 /// </summary>
 public class ApplicationUser : IdentityUser<Guid>
 {

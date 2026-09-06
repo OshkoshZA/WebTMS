@@ -10,6 +10,7 @@ using Tms.Modules.Audit;
 using Tms.Modules.Billing;
 using Tms.Modules.Exceptions;
 using Tms.Modules.Fleet;
+using Tms.Modules.Identity;
 using Tms.Modules.Loads;
 using Tms.Modules.Rating;
 using Tms.Shared;
@@ -83,6 +84,8 @@ public class LoadsController : ControllerBase
     private readonly IAuthorizationService _authorizationService;
     private readonly ExceptionService _exceptions;
     private readonly DocumentPdfService _pdf;
+    private readonly IEmailSender _emailSender;
+    private readonly ILogger<LoadsController> _logger;
 
     public LoadsController(
         TmsDbContext db,
@@ -92,7 +95,9 @@ public class LoadsController : ControllerBase
         LoadStatusService loadStatus,
         IAuthorizationService authorizationService,
         ExceptionService exceptions,
-        DocumentPdfService pdf)
+        DocumentPdfService pdf,
+        IEmailSender emailSender,
+        ILogger<LoadsController> logger)
     {
         _db = db;
         _tenantContext = tenantContext;
@@ -102,6 +107,8 @@ public class LoadsController : ControllerBase
         _loadStatus = loadStatus;
         _exceptions = exceptions;
         _pdf = pdf;
+        _emailSender = emailSender;
+        _logger = logger;
     }
 
     /// <summary>
@@ -404,9 +411,10 @@ public class LoadsController : ControllerBase
         load.Legs.Add(leg);
 
         await _loadStatus.RecomputeAsync(load, ct);
-        await EnsureLoadConfirmationAsync(leg, ct);
+        var confirmation = await EnsureLoadConfirmationAsync(leg, ct);
         await EnsureAccrualsForLegAsync(leg, ct);
         await _db.SaveChangesAsync(ct);
+        if (confirmation is not null) await SendLoadConfirmationEmailAsync(confirmation, ct);
 
         return CreatedAtAction(nameof(Get), new { id = load.Id }, leg);
     }
@@ -490,10 +498,11 @@ public class LoadsController : ControllerBase
         leg.Status = LoadLegStatus.Allocated;
 
         await _loadStatus.RecomputeAsync(load, ct);
-        await EnsureLoadConfirmationAsync(leg, ct);
+        var confirmation = await EnsureLoadConfirmationAsync(leg, ct);
         await EnsureAccrualsForLegAsync(leg, ct);
         await _db.SaveChangesAsync(ct);
         await legLock.CommitAsync(ct);
+        if (confirmation is not null) await SendLoadConfirmationEmailAsync(confirmation, ct);
         return NoContent();
     }
 
@@ -777,12 +786,14 @@ public class LoadsController : ControllerBase
     /// same moment and never again — a commodity line/rate added to this leg
     /// afterward (allowed while still Planned, before a subcontractor is even known;
     /// see AllocateLeg's own comment) simply isn't reflected, the same "never
-    /// re-rendered from current data" rule Invoice/CreditNote follow.
+    /// re-rendered from current data" rule Invoice/CreditNote follow. Returns the new
+    /// confirmation (or null if none was needed) so the caller can email it — only
+    /// after its own SaveChangesAsync actually commits, never before.
     /// </summary>
-    private async Task EnsureLoadConfirmationAsync(LoadLeg leg, CancellationToken ct)
+    private async Task<LoadConfirmation?> EnsureLoadConfirmationAsync(LoadLeg leg, CancellationToken ct)
     {
-        if (leg.ExecutionType != LoadLegExecutionType.Subcontracted || leg.SubcontractorId is null) return;
-        if (await _db.Set<LoadConfirmation>().AnyAsync(lc => lc.LoadLegId == leg.Id, ct)) return;
+        if (leg.ExecutionType != LoadLegExecutionType.Subcontracted || leg.SubcontractorId is null) return null;
+        if (await _db.Set<LoadConfirmation>().AnyAsync(lc => lc.LoadLegId == leg.Id, ct)) return null;
 
         var count = await _db.Set<LoadConfirmation>().CountAsync(lc => lc.CompanyId == leg.CompanyId, ct);
         var confirmation = new LoadConfirmation
@@ -817,6 +828,46 @@ public class LoadsController : ControllerBase
         confirmation.PdfUrl = $"/api/v1/legs/{leg.Id}/confirmation/pdf";
 
         _db.Set<LoadConfirmation>().Add(confirmation);
+        return confirmation;
+    }
+
+    /// <summary>
+    /// "Issued as a PDF — emailed to the subcontractor" (§8.2), now real: every one of
+    /// this Subcontractor's own active portal contacts (an internal staff email has no
+    /// meaning here — this is what the carrier itself receives) gets the rendered PDF
+    /// as an attachment. Called only after the confirmation's own SaveChangesAsync has
+    /// already committed, so a slow or failing send can never roll back a real leg
+    /// allocation. One contact's bad address doesn't stop the others', and a total
+    /// failure here (including SMTP not configured at all, IEmailSender's own
+    /// documented no-op) is logged, not thrown — the confirmation itself, and its PDF,
+    /// are already real and retrievable regardless of whether this email lands.
+    /// </summary>
+    private async Task SendLoadConfirmationEmailAsync(LoadConfirmation confirmation, CancellationToken ct)
+    {
+        var recipients = await _db.Users
+            .Where(u => u.SubcontractorId == confirmation.SubcontractorId && u.Status == UserStatus.Active)
+            .Select(u => u.Email)
+            .ToListAsync(ct);
+
+        var subject = $"Load Confirmation {confirmation.DocumentNumber}";
+        var htmlBody = $"<p>A new load confirmation, <strong>{confirmation.DocumentNumber}</strong>, has been issued to you.</p>" +
+                        "<p>The agreed rate and route are in the attached PDF. Log in to the Supplier Portal to accept or decline it.</p>";
+        var attachments = confirmation.PdfContent is null
+            ? null
+            : new List<EmailAttachment> { new($"{confirmation.DocumentNumber}.pdf", confirmation.PdfContent, "application/pdf") };
+
+        foreach (var email in recipients)
+        {
+            if (string.IsNullOrWhiteSpace(email)) continue;
+            try
+            {
+                await _emailSender.SendAsync(email, subject, htmlBody, attachments, ct);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to email Load Confirmation {DocumentNumber} to {Email}", confirmation.DocumentNumber, email);
+            }
+        }
     }
 
     /// <summary>

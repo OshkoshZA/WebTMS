@@ -41,6 +41,7 @@ builder.Services.AddScoped<Tms.Api.Services.ComplianceReconciliationService>();
 builder.Services.AddScoped<Tms.Api.Services.WebhookPublisher>();
 builder.Services.AddScoped<Tms.Api.Services.WebhookDeliveryService>();
 builder.Services.AddSingleton<Tms.Api.Services.DocumentPdfService>();
+builder.Services.AddSingleton<Tms.Api.Services.IEmailSender, Tms.Api.Services.SmtpEmailSender>();
 builder.Services.AddHttpClient("webhooks", client => client.Timeout = TimeSpan.FromSeconds(10));
 
 // --- Background jobs (§11.3): a plain BackgroundService/PeriodicTimer, not a new

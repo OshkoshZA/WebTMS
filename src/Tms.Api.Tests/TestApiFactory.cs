@@ -20,13 +20,26 @@ namespace Tms.Api.Tests;
 /// </summary>
 internal static class TestApiFactory
 {
-    public static WebApplicationFactory<Program> Create() =>
+    /// <summary>
+    /// <paramref name="extraConfig"/> layers additional overrides on top of the usual
+    /// three (applied last, so it can override them too if a test genuinely needs to) —
+    /// for EmailTestFixture's own per-fixture SmtpTestReceiver port, which can't be a
+    /// fixed value the way the other overrides are.
+    /// </summary>
+    public static WebApplicationFactory<Program> Create(IReadOnlyDictionary<string, string?>? extraConfig = null) =>
         new WebApplicationFactory<Program>().WithWebHostBuilder(builder =>
             builder.ConfigureAppConfiguration((_, config) =>
-                config.AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                var overrides = new Dictionary<string, string?>
                 {
                     ["RateLimiting:AuthPermitLimit"] = "1000",
                     ["RateLimiting:DefaultUserPermitLimit"] = "100000",
                     ["BackgroundJobs:Enabled"] = "false"
-                })));
+                };
+                if (extraConfig is not null)
+                {
+                    foreach (var (key, value) in extraConfig) overrides[key] = value;
+                }
+                config.AddInMemoryCollection(overrides);
+            }));
 }
