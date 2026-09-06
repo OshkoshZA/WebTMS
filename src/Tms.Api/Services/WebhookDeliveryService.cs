@@ -10,13 +10,23 @@ namespace Tms.Api.Services;
 /// <summary>
 /// The read/attempt side of §11.3's outbound events — takes WebhookDelivery rows
 /// WebhookPublisher already queued and persisted, and makes one synchronous, signed HTTP
-/// attempt at each. There is deliberately no background retry worker here (see
-/// WebhookDelivery's own doc comment) — DeliverAsync is called inline, right after the
-/// triggering request's own SaveChangesAsync commits, and WebhookDeliveriesController.Retry
-/// is the only way a Failed row gets attempted again.
+/// attempt at each. DeliverAsync is called inline, right after the triggering request's
+/// own SaveChangesAsync commits; WebhookRetryJob calls RetryAsync again later on a
+/// schedule for anything that came back Failed, and WebhookDeliveriesController.Retry
+/// lets staff force an extra attempt outside that schedule.
 /// </summary>
 public class WebhookDeliveryService
 {
+    /// <summary>Backoff between automatic retry attempts, indexed by (AttemptCount - 1) and clamped to the last entry once AttemptCount exceeds its length — WebhookRetryJob stops sweeping a delivery up at all once AttemptCount reaches this array's length (see BackgroundJobOptions.WebhookMaxAttempts).</summary>
+    public static readonly TimeSpan[] RetryBackoff =
+    [
+        TimeSpan.FromMinutes(1),
+        TimeSpan.FromMinutes(5),
+        TimeSpan.FromMinutes(30),
+        TimeSpan.FromHours(2),
+        TimeSpan.FromHours(12)
+    ];
+
     private static readonly JsonSerializerOptions PayloadOptions = new() { PropertyNamingPolicy = JsonNamingPolicy.CamelCase };
 
     private readonly TmsDbContext _db;
@@ -98,6 +108,18 @@ public class WebhookDeliveryService
             delivery.Status = WebhookDeliveryStatus.Failed;
             delivery.ResponseStatusCode = null;
             delivery.ErrorDetail = ex.Message;
+        }
+
+        if (delivery.Status == WebhookDeliveryStatus.Delivered)
+        {
+            delivery.AttemptCount = 0;
+            delivery.NextAttemptAtUtc = null;
+        }
+        else
+        {
+            delivery.AttemptCount++;
+            var backoff = RetryBackoff[Math.Min(delivery.AttemptCount, RetryBackoff.Length) - 1];
+            delivery.NextAttemptAtUtc = DateTimeOffset.UtcNow + backoff;
         }
     }
 }

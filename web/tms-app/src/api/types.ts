@@ -685,6 +685,8 @@ export interface WebhookDelivery {
   attemptedAtUtc: string | null
   responseStatusCode: number | null
   errorDetail: string | null
+  attemptCount: number
+  nextAttemptAtUtc: string | null
 }
 
 export interface RetentionPolicy {

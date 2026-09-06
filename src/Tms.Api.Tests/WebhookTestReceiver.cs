@@ -12,10 +12,11 @@ namespace Tms.Api.Tests;
 /// The dev SQL Server database this suite runs against is shared and never reset
 /// (StaffTestFixture), so WebhookSubscriptions rows from long-past runs sit around
 /// forever, still Active, still matching any future invoice/credit-note/etc. issued
-/// anywhere in the whole suite for the same seeded demo company — and delivery is
-/// synchronous and inline (no background retry worker exists), so a stale subscription
-/// gets a real HTTP attempt fired at its old callback URL the moment such an event
-/// next fires. Because the OS reissues ephemeral loopback ports, that old URL's port
+/// anywhere in the whole suite for the same seeded demo company — and the initial
+/// delivery attempt is synchronous and inline regardless (WebhookRetryJob only ever
+/// picks up what's already Failed), so a stale subscription gets a real HTTP attempt
+/// fired at its old callback URL the moment such an event next fires. Because the OS
+/// reissues ephemeral loopback ports, that old URL's port
 /// can and does get handed to a brand-new instance of this class. The unique path
 /// segment below is what stops that from becoming cross-test contamination: a stale
 /// subscription's URL points at some *other* instance's path, so http.sys simply has

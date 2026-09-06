@@ -133,6 +133,7 @@ async function retry(deliveryId: string) {
               <th class="px-4 py-3">Status</th>
               <th class="px-4 py-3">Response</th>
               <th class="px-4 py-3">Error</th>
+              <th class="px-4 py-3">Next auto-retry</th>
               <th v-if="canManage" class="px-4 py-3">Action</th>
             </tr>
           </thead>
@@ -145,6 +146,9 @@ async function retry(deliveryId: string) {
               </td>
               <td class="px-4 py-3 text-slate-600">{{ delivery.responseStatusCode ?? '—' }}</td>
               <td class="px-4 py-3 max-w-xs truncate text-slate-600" :title="delivery.errorDetail ?? ''">{{ delivery.errorDetail ?? '—' }}</td>
+              <td class="px-4 py-3 text-slate-600">
+                {{ delivery.nextAttemptAtUtc ? `${formatDateTime(delivery.nextAttemptAtUtc)} (attempt ${delivery.attemptCount + 1})` : '—' }}
+              </td>
               <td v-if="canManage" class="px-4 py-3">
                 <button
                   type="button"

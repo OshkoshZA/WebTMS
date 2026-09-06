@@ -76,6 +76,9 @@ public class StaffTestFixture : IAsyncLifetime
     /// <summary>A fresh, unauthenticated client against the same in-process app — for AuthController tests that need to control login/refresh/logout themselves rather than reusing StaffClient's already-issued token.</summary>
     public HttpClient CreateAnonymousClient() => _factory.CreateClient();
 
+    /// <summary>The in-process app's own DI container — for tests that need to resolve a service directly (e.g. WebhookRetryJob.RunOnceAsync) rather than driving it through an HTTP endpoint. BackgroundJobs:Enabled is false for this whole factory (TestApiFactory), so no hosted service is already running one of these concurrently.</summary>
+    public IServiceProvider Services => _factory.Services;
+
     public async Task<Guid> CreateClientAsync(string suffix, decimal creditLimit = 1_000_000m)
     {
         var response = await StaffClient.PostAsJsonAsync("/api/v1/clients", new

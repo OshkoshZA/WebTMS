@@ -12,6 +12,11 @@ namespace Tms.Api.Tests;
 /// through one shared, pre-authenticated staff session and comfortably clears that in
 /// well under a minute). Both are sized for one real caller, not a full test run's
 /// worth of traffic funneled through a single session.
+///
+/// Also disables BackgroundJobs (§11.3) — WebhookRetryHostedService's own timer would
+/// otherwise start ticking against the same rows a test is busy asserting on. A test
+/// that wants the sweep logic itself resolves WebhookRetryJob from the factory's
+/// services and calls RunOnceAsync directly instead.
 /// </summary>
 internal static class TestApiFactory
 {
@@ -21,6 +26,7 @@ internal static class TestApiFactory
                 config.AddInMemoryCollection(new Dictionary<string, string?>
                 {
                     ["RateLimiting:AuthPermitLimit"] = "1000",
-                    ["RateLimiting:DefaultUserPermitLimit"] = "100000"
+                    ["RateLimiting:DefaultUserPermitLimit"] = "100000",
+                    ["BackgroundJobs:Enabled"] = "false"
                 })));
 }

@@ -11,7 +11,8 @@ namespace Tms.Api.Controllers;
 
 public record WebhookDeliveryResponse(
     Guid Id, Guid SubscriptionId, string EventType, string EntityType, string EntityId, DateTimeOffset OccurredAtUtc,
-    WebhookDeliveryStatus Status, DateTimeOffset? AttemptedAtUtc, int? ResponseStatusCode, string? ErrorDetail);
+    WebhookDeliveryStatus Status, DateTimeOffset? AttemptedAtUtc, int? ResponseStatusCode, string? ErrorDetail,
+    int AttemptCount, DateTimeOffset? NextAttemptAtUtc);
 
 /// <summary>
 /// The read/replay side of §11.3's delivery tracking — mirrors §11.2's documented
@@ -51,7 +52,7 @@ public class WebhookDeliveriesController : ControllerBase
         return Ok(deliveries.Select(ToResponse));
     }
 
-    /// <summary>Re-attempts one delivery regardless of its current Status — an explicit, deliberate staff action, not something anything else does automatically (§11.3: no background retry worker exists).</summary>
+    /// <summary>Re-attempts one delivery regardless of its current Status or NextAttemptAtUtc — an explicit, deliberate staff action that jumps the schedule WebhookRetryJob otherwise follows on its own (§11.3).</summary>
     [HttpPost("{id:guid}/retry")]
     [Authorize(Policy = "integration.webhook.manage")]
     public async Task<ActionResult<WebhookDeliveryResponse>> Retry(Guid id, CancellationToken ct)
@@ -65,5 +66,6 @@ public class WebhookDeliveriesController : ControllerBase
 
     private static WebhookDeliveryResponse ToResponse(WebhookDelivery d) => new(
         d.Id, d.SubscriptionId, d.EventType, d.EntityType, d.EntityId, d.OccurredAtUtc,
-        d.Status, d.AttemptedAtUtc, d.ResponseStatusCode, d.ErrorDetail);
+        d.Status, d.AttemptedAtUtc, d.ResponseStatusCode, d.ErrorDetail,
+        d.AttemptCount, d.NextAttemptAtUtc);
 }
