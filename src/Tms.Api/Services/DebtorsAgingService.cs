@@ -5,15 +5,23 @@ using Tms.Modules.Loads;
 
 namespace Tms.Api.Services;
 
-public record ClientAgingBuckets(decimal CurrentAmount, decimal Days30, decimal Days60, decimal Days90, decimal Days90Plus)
+/// <summary>
+/// The one definition of an aged-debtors bucket set (Current/30/60/90/90+) plus its
+/// total — everything else that needs one derives from this positional record rather
+/// than redeclaring the same five fields, so a boundary or field ever changing has
+/// exactly one place to change it. Record inheritance still serializes as one flat
+/// JSON object (no nested "buckets" property), so a derived type — one that also needs
+/// an id alongside the buckets, e.g. <see cref="CurrencyAgingBuckets"/> — is a
+/// drop-in, wire-compatible replacement for what used to be its own hand-duplicated
+/// record.
+/// </summary>
+public record AgingBuckets(decimal CurrentAmount, decimal Days30, decimal Days60, decimal Days90, decimal Days90Plus)
 {
     public decimal TotalOutstanding => CurrentAmount + Days30 + Days60 + Days90 + Days90Plus;
 }
 
 public record CurrencyAgingBuckets(Guid CurrencyId, decimal CurrentAmount, decimal Days30, decimal Days60, decimal Days90, decimal Days90Plus)
-{
-    public decimal TotalOutstanding => CurrentAmount + Days30 + Days60 + Days90 + Days90Plus;
-}
+    : AgingBuckets(CurrentAmount, Days30, Days60, Days90, Days90Plus);
 
 /// <summary>
 /// Real aged-debtors buckets computed live from actual invoice data (docs/architecture.html
@@ -35,10 +43,32 @@ public class DebtorsAgingService
         _db = db;
     }
 
-    public async Task<ClientAgingBuckets> ComputeForClientAsync(Guid clientId, DateOnly asOf, CancellationToken ct)
+    /// <summary>The one place a (days overdue, amount) pair turns into a bucket — both ComputeForClientsAsync and ComputeCompanyWideByCurrencyAsync add to their own running per-key accumulator through this, so the boundary logic exists exactly once.</summary>
+    private static Accumulator AddToBucket(Accumulator bucket, int daysOverdue, decimal amount)
+    {
+        if (daysOverdue <= 0) bucket.Current += amount;
+        else if (daysOverdue <= 30) bucket.Days30 += amount;
+        else if (daysOverdue <= 60) bucket.Days60 += amount;
+        else if (daysOverdue <= 90) bucket.Days90 += amount;
+        else bucket.Days90Plus += amount;
+        return bucket;
+    }
+
+    private struct Accumulator
+    {
+        public decimal Current;
+        public decimal Days30;
+        public decimal Days60;
+        public decimal Days90;
+        public decimal Days90Plus;
+
+        public readonly AgingBuckets ToBuckets() => new(Current, Days30, Days60, Days90, Days90Plus);
+    }
+
+    public async Task<AgingBuckets> ComputeForClientAsync(Guid clientId, DateOnly asOf, CancellationToken ct)
     {
         var byClient = await ComputeForClientsAsync(new[] { clientId }, asOf, ct);
-        return byClient.GetValueOrDefault(clientId) ?? new ClientAgingBuckets(0, 0, 0, 0, 0);
+        return byClient.GetValueOrDefault(clientId) ?? new AgingBuckets(0, 0, 0, 0, 0);
     }
 
     /// <summary>
@@ -58,7 +88,7 @@ public class DebtorsAgingService
     /// Outstanding figure nets every Issued CreditNote against the total the same way,
     /// just bucketed here rather than left as one lump sum.
     /// </summary>
-    public async Task<Dictionary<Guid, ClientAgingBuckets>> ComputeForClientsAsync(
+    public async Task<Dictionary<Guid, AgingBuckets>> ComputeForClientsAsync(
         IReadOnlyCollection<Guid> clientIds, DateOnly asOf, CancellationToken ct)
     {
         var clientCurrencies = await _db.Clients
@@ -83,7 +113,7 @@ public class DebtorsAgingService
             .Select(g => new { ClientId = g.Key, Total = g.Sum(cn => cn.TotalAmount) })
             .ToDictionaryAsync(x => x.ClientId, x => x.Total, ct);
 
-        var totals = clientIds.ToDictionary(id => id, _ => (Current: 0m, D30: 0m, D60: 0m, D90: 0m, D90Plus: 0m));
+        var totals = clientIds.ToDictionary(id => id, _ => new Accumulator());
 
         foreach (var invoice in invoices)
         {
@@ -92,13 +122,7 @@ public class DebtorsAgingService
 
             var net = invoice.TotalIncVat - creditsByInvoiceId.GetValueOrDefault(invoice.Id);
             var daysOverdue = asOf.DayNumber - invoice.DueDate.DayNumber;
-            var bucket = totals[invoice.ClientId];
-            if (daysOverdue <= 0) bucket.Current += net;
-            else if (daysOverdue <= 30) bucket.D30 += net;
-            else if (daysOverdue <= 60) bucket.D60 += net;
-            else if (daysOverdue <= 90) bucket.D90 += net;
-            else bucket.D90Plus += net;
-            totals[invoice.ClientId] = bucket;
+            totals[invoice.ClientId] = AddToBucket(totals[invoice.ClientId], daysOverdue, net);
         }
 
         foreach (var (clientId, standaloneCredit) in standaloneCreditsByClient)
@@ -108,7 +132,7 @@ public class DebtorsAgingService
             totals[clientId] = bucket;
         }
 
-        return totals.ToDictionary(x => x.Key, x => new ClientAgingBuckets(x.Value.Current, x.Value.D30, x.Value.D60, x.Value.D90, x.Value.D90Plus));
+        return totals.ToDictionary(x => x.Key, x => x.Value.ToBuckets());
     }
 
     /// <summary>
@@ -138,19 +162,13 @@ public class DebtorsAgingService
             .Select(g => new { CurrencyId = g.Key, Total = g.Sum(cn => cn.TotalAmount) })
             .ToDictionaryAsync(x => x.CurrencyId, x => x.Total, ct);
 
-        var totals = new Dictionary<Guid, (decimal Current, decimal D30, decimal D60, decimal D90, decimal D90Plus)>();
+        var totals = new Dictionary<Guid, Accumulator>();
 
         foreach (var invoice in invoices)
         {
             var net = invoice.TotalIncVat - creditsByInvoiceId.GetValueOrDefault(invoice.Id);
             var daysOverdue = asOf.DayNumber - invoice.DueDate.DayNumber;
-            var bucket = totals.GetValueOrDefault(invoice.CurrencyId);
-            if (daysOverdue <= 0) bucket.Current += net;
-            else if (daysOverdue <= 30) bucket.D30 += net;
-            else if (daysOverdue <= 60) bucket.D60 += net;
-            else if (daysOverdue <= 90) bucket.D90 += net;
-            else bucket.D90Plus += net;
-            totals[invoice.CurrencyId] = bucket;
+            totals[invoice.CurrencyId] = AddToBucket(totals.GetValueOrDefault(invoice.CurrencyId), daysOverdue, net);
         }
 
         foreach (var (currencyId, standaloneCredit) in standaloneCreditsByCurrency)
@@ -161,7 +179,7 @@ public class DebtorsAgingService
         }
 
         return totals
-            .Select(x => new CurrencyAgingBuckets(x.Key, x.Value.Current, x.Value.D30, x.Value.D60, x.Value.D90, x.Value.D90Plus))
+            .Select(x => new CurrencyAgingBuckets(x.Key, x.Value.Current, x.Value.Days30, x.Value.Days60, x.Value.Days90, x.Value.Days90Plus))
             .ToList();
     }
 }

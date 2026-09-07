@@ -147,7 +147,7 @@ public class ClientsController : ControllerBase
     /// (§16.3) had documented. Same portal-access rule as CreditStatus above.
     /// </summary>
     [HttpGet("{id:guid}/aging/live")]
-    public async Task<ActionResult<ClientAgingBuckets>> LiveAging(Guid id, CancellationToken ct)
+    public async Task<ActionResult<AgingBuckets>> LiveAging(Guid id, CancellationToken ct)
     {
         if (!await _db.Clients.AnyAsync(c => c.Id == id, ct)) return NotFound();
 

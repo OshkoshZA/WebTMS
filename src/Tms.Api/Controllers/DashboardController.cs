@@ -24,10 +24,7 @@ public record CreditExposureSummaryResponse(IReadOnlyList<CurrencyExposureTotal>
 
 public record PayablesSummaryResponse(int Accrued, int AvailableToExport, int Exported, int Paid);
 
-public record CurrencyAgingTotal(
-    Guid CurrencyId, decimal CurrentAmount, decimal Days30, decimal Days60, decimal Days90, decimal Days90Plus, decimal TotalOutstanding);
-
-public record AgedDebtorsSummaryResponse(IReadOnlyList<CurrencyAgingTotal> ByCurrency);
+public record AgedDebtorsSummaryResponse(IReadOnlyList<CurrencyAgingBuckets> ByCurrency);
 
 public record OnTimeDeliverySummaryResponse(int OnTimeCount, int LateCount, decimal? OnTimeRatePercent);
 
@@ -222,11 +219,7 @@ public class DashboardController : ControllerBase
         if (_tenantContext.SubcontractorId is not null || _tenantContext.ClientId is not null) return Forbid();
 
         var buckets = await _aging.ComputeCompanyWideByCurrencyAsync(DateOnly.FromDateTime(DateTime.UtcNow), ct);
-        var byCurrency = buckets
-            .Select(b => new CurrencyAgingTotal(b.CurrencyId, b.CurrentAmount, b.Days30, b.Days60, b.Days90, b.Days90Plus, b.TotalOutstanding))
-            .ToList();
-
-        return Ok(new AgedDebtorsSummaryResponse(byCurrency));
+        return Ok(new AgedDebtorsSummaryResponse(buckets));
     }
 
     /// <summary>
