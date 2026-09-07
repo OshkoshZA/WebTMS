@@ -120,9 +120,7 @@ public class LegsController : ControllerBase
 
         var portalCheck = await CheckPortalAccessAsync(confirmation.SubcontractorId, "portal.subcontractor.viewlegs");
         if (portalCheck is not null) return portalCheck;
-        if (confirmation.PdfContent is null) return NotFound();
-
-        return File(confirmation.PdfContent, "application/pdf", $"{confirmation.DocumentNumber}.pdf");
+        return this.PdfFileOrNotFound(confirmation.PdfContent, $"{confirmation.DocumentNumber}.pdf");
     }
 
     /// <summary>

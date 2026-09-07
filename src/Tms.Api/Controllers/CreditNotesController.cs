@@ -277,9 +277,7 @@ public class CreditNotesController : ControllerBase
         if (creditNote is null) return NotFound();
         if (!_tenantContext.CanAccessClient(creditNote.ClientId)) return Forbid();
         if (_tenantContext.ClientId is not null && creditNote.Status == CreditNoteStatus.Draft) return Forbid();
-        if (creditNote.PdfContent is null) return NotFound();
-
-        return File(creditNote.PdfContent, "application/pdf", $"{creditNote.CreditNoteNumber}.pdf");
+        return this.PdfFileOrNotFound(creditNote.PdfContent, $"{creditNote.CreditNoteNumber}.pdf");
     }
 
     /// <summary>Draft -> Void — the only cancellation path (§10.1), and only while still Draft.</summary>

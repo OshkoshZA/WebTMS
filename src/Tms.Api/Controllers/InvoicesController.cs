@@ -230,9 +230,7 @@ public class InvoicesController : ControllerBase
         if (invoice is null) return NotFound();
         if (!_tenantContext.CanAccessClient(invoice.ClientId)) return Forbid();
         if (_tenantContext.ClientId is not null && invoice.Status == InvoiceStatus.Draft) return Forbid();
-        if (invoice.PdfContent is null) return NotFound();
-
-        return File(invoice.PdfContent, "application/pdf", $"{invoice.InvoiceNumber}.pdf");
+        return this.PdfFileOrNotFound(invoice.PdfContent, $"{invoice.InvoiceNumber}.pdf");
     }
 
     /// <summary>Draft -> Void — the only cancellation path (§10.1), and only while still Draft.</summary>
