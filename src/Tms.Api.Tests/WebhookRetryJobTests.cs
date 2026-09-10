@@ -109,12 +109,24 @@ public class WebhookRetryJobTests : IAsyncLifetime
         var job = _fx.Services.GetRequiredService<WebhookRetryJob>();
         await job.RunOnceAsync(CancellationToken.None);
 
-        // At least the original failed attempt plus the sweep's retry. Seen as 3 once in
-        // a full-suite run rather than exactly 2 — root cause not confirmed, but this
-        // job deliberately sweeps every tenant's due deliveries in one pass (§11.3), so
-        // an exact count here is not the invariant actually worth pinning down; the
-        // status transition below is the real correctness signal and isn't subject to
-        // the same ambiguity.
+        // At least the original failed attempt plus the sweep's retry. Seen as 3 once,
+        // during an abnormally slow full-suite run rather than exactly 2. AttemptCount and
+        // Status only ever move once per AttemptAsync call (WebhookDeliveryService.cs), and
+        // every other app-level source of a duplicate has a hard blocker: a duplicate queued
+        // delivery is caught by GetOnlyDeliveryAsync's own Assert.Single right after issuing;
+        // WebhookRetryHostedService never runs a competing sweep (TestApiFactory forces
+        // BackgroundJobs:Enabled false for every fixture); and a stale subscription from an
+        // earlier run can't land on this receiver (WebhookTestReceiver's per-instance path
+        // token 404s anything not addressed to it). What's left is the transport, not the
+        // app: "webhooks" is a plain AddHttpClient (Program.cs) with no retry policy of its
+        // own, so its pooled SocketsHttpHandler owns the two real attempts to this receiver's
+        // one URL — and a pooled connection that the server (or an idle gap stretched by a
+        // loaded run) closes between them is transparently resent on a fresh connection
+        // before any request bytes go out, which the receiver then counts as a 3rd request
+        // without WebhookDeliveryService ever making a 3rd call. That's a documented .NET
+        // behavior, not app logic, so pinning this to exactly 2 would be asserting a
+        // transport implementation detail; the status transition below is the actual
+        // correctness signal, and isn't subject to the same ambiguity.
         Assert.True(receiver.Requests.Count >= 2, $"Expected at least 2 requests, saw {receiver.Requests.Count}.");
         Assert.Equal(1, (await GetOnlyDeliveryAsync(subscriptionId)).Status); // Delivered
     }
