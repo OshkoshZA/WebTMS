@@ -54,6 +54,13 @@ public class DebtorsAgingService
         return bucket;
     }
 
+    /// <summary>A standalone CreditNote has no invoice of its own to net against, so — like AddToBucket above — both methods reduce their own running accumulator's Current bucket through this one place rather than repeating the read-mutate-write shape.</summary>
+    private static Accumulator ApplyStandaloneCredit(Accumulator bucket, decimal amount)
+    {
+        bucket.Current -= amount;
+        return bucket;
+    }
+
     private struct Accumulator
     {
         public decimal Current;
@@ -126,11 +133,7 @@ public class DebtorsAgingService
         }
 
         foreach (var (clientId, standaloneCredit) in standaloneCreditsByClient)
-        {
-            var bucket = totals[clientId];
-            bucket.Current -= standaloneCredit;
-            totals[clientId] = bucket;
-        }
+            totals[clientId] = ApplyStandaloneCredit(totals[clientId], standaloneCredit);
 
         return totals.ToDictionary(x => x.Key, x => x.Value.ToBuckets());
     }
@@ -172,11 +175,7 @@ public class DebtorsAgingService
         }
 
         foreach (var (currencyId, standaloneCredit) in standaloneCreditsByCurrency)
-        {
-            var bucket = totals.GetValueOrDefault(currencyId);
-            bucket.Current -= standaloneCredit;
-            totals[currencyId] = bucket;
-        }
+            totals[currencyId] = ApplyStandaloneCredit(totals.GetValueOrDefault(currencyId), standaloneCredit);
 
         return totals
             .Select(x => new CurrencyAgingBuckets(x.Key, x.Value.Current, x.Value.Days30, x.Value.Days60, x.Value.Days90, x.Value.Days90Plus))
